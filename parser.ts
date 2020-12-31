@@ -153,7 +153,7 @@ export class Parser{
             return lrgn;
         }
 
-        const getLartChunk = (offset) => {
+        const getLartChunk = (offset : number) => {
             if (getString(offset, 4) !== 'LIST') {
                 throw new Error('lart must be LIST');
             }
@@ -168,7 +168,7 @@ export class Parser{
                 const subSize = data.getUint32(subOffset + 4, true);
                 if (subKey === 'art1') {
                     const art1Chunk = new Chunk.Art1Chunk(subOffset, subSize, {
-                        cbSize: data.getUint32(offset + 8, true),
+                        cbSize: data.getUint32(subOffset + 8, true),
                         cConnectionBlocks: data.getUint32(subOffset + 12, true),
                     });
                     for (let i = 0; i < art1Chunk.cConnectionBlocks; i++) {

@@ -96,10 +96,11 @@ async function loadFile(/** @type {Event} */ e) {
                 bankIDDataMap.forEach((data, bankID) => {
                     const {insChunk} = data;
                     const lart = insChunk.lart;
-                    const art1 = lart?.art1List[0];
+                    const art1 = lart?.art1List;
                     const button = document.createElement('button');
                     button.innerText = bankID;
                     button.addEventListener('click', () => {
+                        console.log(inam, bankID, data.regionMap[69], art1);
                         const ccdiv = document.createElement('div');
                         ccdiv.innerText = '● ' + bankID;
                         ccdiv.appendChild(document.createElement('br'));
@@ -108,6 +109,8 @@ async function loadFile(/** @type {Event} */ e) {
                             const regionData = data.regionMap[midiID]; // as Chunk.RgnChunk;
                             const wsmp = regionData.wsmp;
                             const wlnk = regionData.wlnk;
+                            // const lart = regionData.lart;
+                            // console.log(lart);
                             if (!wlnk) return;
                             const wave = {
                                 id: wlnk.ulTableIndex, 
@@ -119,40 +122,72 @@ async function loadFile(/** @type {Event} */ e) {
 
                             const audio = document.createElement('audio');
                             if (wsmp) {
-                                // Hzを変更させる(nSamplesPerSec 部分を改竄)
+                                // 元のデータ
+                                let segment = new Uint8Array(wave.wData.segmentData);
                                 const baseID = wsmp.usUnityNote;
                                 const baseFreq = parser.frequencyTable[baseID];
-                                const altFreq = parser.frequencyTable[Number(midiID)];
-                                const freqRate = altFreq / baseFreq;
-                                let segment = new Uint8Array(wave.wData.segmentData);
-                                const bitRate = getLittleEndianNumberFromUint8Array(segment, 24, 4);
-                                const newBitRate = bitRate * freqRate;
-                                setLittleEndianNumberToUint8Array(segment, 24, 4, newBitRate);
+                                const baseBitRate = getLittleEndianNumberFromUint8Array(segment, 24, 4);
+
+                                // waveのdata部分を抽出して変更しやすいようにInt16Array生成
+                                const dataSize = getLittleEndianNumberFromUint8Array(segment, 86, 4);
+                                const blockAlign = getLittleEndianNumberFromUint8Array(segment, 32, 2); // たぶん2 (16bit monoral)
+                                if (blockAlign !== 2) {
+                                    throw new Error("Sorry! not implemented for blockAlign ", blockAlign);
+                                }
+                                let waveDataSegment = new Int16Array(dataSize / blockAlign);
+                                for(let i = 0; i < dataSize / blockAlign; i++) {
+                                    const v = getLittleEndianNumberFromUint8Array(segment, 90 + (i * blockAlign), blockAlign);
+                                    if (v > 0x8000) {
+                                        v = -((0x10000 - v) & 0x7FFF);
+                                    }
+                                    if (v === 0x8000) {
+                                        v = -0x8000;
+                                    }
+                                    waveDataSegment.set([v], i);
+                                }
 
                                 // ループ設定
                                 if (wsmp.cSampleLoops == 1 && wsmp.waveSampleLoop.cbSize > 0) {
                                     const waveSample = wsmp.waveSampleLoop;
                                     const loopStart = waveSample.ulLoopStart;
                                     const loopLength = waveSample.ulLoopLength;
-                                    const waveSize = getLittleEndianNumberFromUint8Array(segment, 4, 4);
-                                    const dataSize = getLittleEndianNumberFromUint8Array(segment, 86, 4);
-                                    const blockAlign = getLittleEndianNumberFromUint8Array(segment, 32, 2); // たぶん2 (16bit monoral)
+                                    //const dataSize = getLittleEndianNumberFromUint8Array(segment, 86, 4);
+                                    //const blockAlign = getLittleEndianNumberFromUint8Array(segment, 32, 2); // たぶん2 (16bit monoral)
                                     // 雑に50回ループさせた新wave作成 (NOTE: offsetはblockAlignを考慮させる)
                                     const loopCount = 50;
-                                    const newWaveSize = waveSize + (loopLength * (loopCount - 1) * blockAlign);
-                                    const newDataSize = dataSize + (loopLength * (loopCount - 1) * blockAlign);
-                                    const newSegment = new Uint8Array(newWaveSize + 8); // waveSizeは先頭8バイトを考慮してない
-                                    newSegment.set(segment, 0);
-                                    setLittleEndianNumberToUint8Array(newSegment, 4, 4, newWaveSize);
-                                    setLittleEndianNumberToUint8Array(newSegment, 86, 4, newDataSize);
-                                    for (let i = 1; i < loopCount; i++) {
-                                        const offsetStart = 90 + (loopStart + loopLength * i) * blockAlign;
-                                        newSegment.set([...segment.slice(90 + loopStart * blockAlign, 90 + (loopStart + loopLength) * blockAlign)], offsetStart);
+                                    const loopBlock = waveDataSegment.slice(loopStart, loopStart + loopLength);
+                                    
+                                    const newWaveDataSegmentSize = (dataSize / blockAlign) + loopLength * (loopCount - 1);
+                                    const newWaveDataSegment = new Int16Array(newWaveDataSegmentSize);
+                                    newWaveDataSegment.set(waveDataSegment, 0);
+                                    for(i = 1; i < loopCount; i++) {
+                                        newWaveDataSegment.set(loopBlock, dataSize / blockAlign + (i - 1) * loopLength);
                                     }
-                                    newSegment.set([...segment.slice(90 + (loopStart + loopLength) * blockAlign)], 90 + (loopStart + loopLength * loopCount) * blockAlign);
-                                    segment = newSegment;
+                                    
+                                    waveDataSegment = newWaveDataSegment;
                                 }
-                                const newBlob = new Blob([segment], { type: 'audio/wav' });
+                                
+                                //const dataSize = getLittleEndianNumberFromUint8Array(segment, 86, 4);
+                                // Int16ArrayをUint8Arrayに戻して新しいSegmentを作る
+                                const newDataSize = waveDataSegment.length * 2;
+                                const newWaveSize = segment.length + (newDataSize - dataSize);
+                                const newSegment = new Uint8Array(newWaveSize);
+                                newSegment.set(segment, 0);
+                                newSegment.set(segment.slice(90 + dataSize), 90 + newDataSize);
+                                setLittleEndianNumberToUint8Array(newSegment, 4, 4, newWaveSize);
+                                setLittleEndianNumberToUint8Array(newSegment, 86, 4, newDataSize);
+                                for (let i = 0; i < waveDataSegment.length; i++) {
+                                    setLittleEndianNumberToUint8Array(newSegment, 90 + i * 2, 2, waveDataSegment[i]);
+                                }
+
+                                // Hz改変(仮)
+                                // nSamplesPerSec 部分を改竄
+                                const altFreq = parser.frequencyTable[Number(midiID)];
+                                const freqRate = altFreq / baseFreq;
+                                const newBitRate = baseBitRate * freqRate;
+                                setLittleEndianNumberToUint8Array(newSegment, 24, 4, newBitRate);
+
+                                const newBlob = new Blob([newSegment], { type: 'audio/wav' });
                                 audio.src = window.URL.createObjectURL(newBlob);
                             } else {
                                 audio.src = wave.wData.wave;
