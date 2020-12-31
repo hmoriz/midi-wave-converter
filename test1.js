@@ -1,4 +1,6 @@
+import { Chunk } from "./chunk";
 import { Parser } from "./parser";
+const Chart = require('chart.js');
 
 function getLittleEndianNumberFromUint8Array(/**@type {Uint8Array}*/data, offset, size) {
     let ret = 0;
@@ -14,8 +16,8 @@ function setLittleEndianNumberToUint8Array(/**@type {Uint8Array} */data, offset,
     }
 }
 
-/** @type {HTMLTextAreaElement} */
-let textarea;
+/** @type {HTMLCanvasElement} */
+let canvas;
 async function loadFile(/** @type {Event} */ e) {
     for (let i = 0; i < e.target.files.length; i++) {
         /** @type {File} */
@@ -25,16 +27,76 @@ async function loadFile(/** @type {Event} */ e) {
         const {wpls, instrumentIDMap} = parseResult;
 
         console.log(instrumentIDMap);
-        for (let id in instrumentIDMap) {
-            const inamBankIDDataMap = instrumentIDMap[id];
+
+        const datasets = new Array();
+        wpls.waveList.forEach((wpl) => {
+            if (datasets.length >= 4)return;
+            const segment = wpl.segmentData;
+            const waveData = new Uint8Array(segment.slice(90));
+            const waveValues = new Array();
+            for (let i = 0; i < Math.min(waveData.length / 2, 1000); i++ ){
+                let v = getLittleEndianNumberFromUint8Array(waveData, i * 2, 2);
+                if (v > 32768) {
+                    v = -((65536 - v) & 32767);
+                }
+                if (v === 32768) {v = -v}
+                waveValues.push(v);
+            }
+            datasets.push({
+                label: (datasets.length + 1).toString(),
+                data: waveValues,
+                borderColor: `rgb(${Math.round(Math.random() * 256)}, ${Math.round(Math.random() * 256)}, ${Math.round(Math.random() * 256)})`,
+                backgroundColor: "rgba(0,0,0,0)",
+            })
+        });
+        console.log(datasets);
+        const labels = new Array();
+        for (let i = 0; i < 1000; i++) {
+            labels.push(i.toString());
+        }
+        const c = new Chart(canvas, 
+            {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: datasets,
+                },
+                options: {
+                    responsive: true,
+                    title: {
+                        display: true,
+                        text: 'test',
+                    },
+                    scales: {
+                        xAxes: [{
+                            display: true,
+                            scaleLabel: {
+                                display: true,
+                                labelString: 'f',
+                            },
+                        }],
+                        yAxes: [{
+                            ticks: {
+                                suggestedMin: -32768,
+                                suggestedMax: 32768,
+                            }
+                        }]
+                    }
+                }
+            }
+        );
+        console.log(c);
+
+        instrumentIDMap.forEach((inamBankIDDataMap, id) => {
             const pElem = document.createElement('p');
             pElem.innerText = id;
-            for (let inam in inamBankIDDataMap) {
-                const bankIDDataMap = inamBankIDDataMap[inam];
+            inamBankIDDataMap.forEach((bankIDDataMap, inam) => {
                 const cdiv = document.createElement('div');
                 cdiv.innerText = '☆ ' + inam;
-                for(let bankID in bankIDDataMap) {
-                    const data = bankIDDataMap[bankID];
+                bankIDDataMap.forEach((data, bankID) => {
+                    const {insChunk} = data;
+                    const lart = insChunk.lart;
+                    const art1 = lart?.art1List[0];
                     const button = document.createElement('button');
                     button.innerText = bankID;
                     button.addEventListener('click', () => {
@@ -42,13 +104,14 @@ async function loadFile(/** @type {Event} */ e) {
                         ccdiv.innerText = '● ' + bankID;
                         ccdiv.appendChild(document.createElement('br'));
                         Object.keys(data.regionMap).forEach((midiID) => {
-                            const regionData = data.regionMap[midiID];
-                            const wsmp = regionData.subData.subData.filter((data) => data.key === 'wsmp')[0];
-                            const wlnk = regionData.subData.subData.filter((data) => data.key === 'wlnk')[0];
+                            /** @type {Chunk.RgnChunk} */
+                            const regionData = data.regionMap[midiID]; // as Chunk.RgnChunk;
+                            const wsmp = regionData.wsmp;
+                            const wlnk = regionData.wlnk;
                             if (!wlnk) return;
                             const wave = {
-                                id: wlnk.data.uTableIndex, 
-                                wData: wpls[wlnk.data.uTableIndex].subData};
+                                id: wlnk.ulTableIndex, 
+                                wData: wpls.waveList[wlnk.ulTableIndex]};
                             if (!wave.wData) return;
                             const span = document.createElement('span');
                             span.style.display = 'inline-block';
@@ -57,20 +120,20 @@ async function loadFile(/** @type {Event} */ e) {
                             const audio = document.createElement('audio');
                             if (wsmp) {
                                 // Hzを変更させる(nSamplesPerSec 部分を改竄)
-                                const baseID = wsmp.data.usUnityNote;
+                                const baseID = wsmp.usUnityNote;
                                 const baseFreq = parser.frequencyTable[baseID];
                                 const altFreq = parser.frequencyTable[Number(midiID)];
                                 const freqRate = altFreq / baseFreq;
-                                let segment = new Uint8Array(wave.wData.segment);
+                                let segment = new Uint8Array(wave.wData.segmentData);
                                 const bitRate = getLittleEndianNumberFromUint8Array(segment, 24, 4);
                                 const newBitRate = bitRate * freqRate;
                                 setLittleEndianNumberToUint8Array(segment, 24, 4, newBitRate);
 
                                 // ループ設定
-                                if (wsmp.data.waveSamples && wsmp.data.waveSamples.length == 1) {
-                                    const waveSample = wsmp.data.waveSamples[0];
-                                    const loopStart = waveSample.uLoopStart;
-                                    const loopLength = waveSample.uLoopLength;
+                                if (wsmp.cSampleLoops == 1 && wsmp.waveSampleLoop.cbSize > 0) {
+                                    const waveSample = wsmp.waveSampleLoop;
+                                    const loopStart = waveSample.ulLoopStart;
+                                    const loopLength = waveSample.ulLoopLength;
                                     const waveSize = getLittleEndianNumberFromUint8Array(segment, 4, 4);
                                     const dataSize = getLittleEndianNumberFromUint8Array(segment, 86, 4);
                                     const blockAlign = getLittleEndianNumberFromUint8Array(segment, 32, 2); // たぶん2 (16bit monoral)
@@ -112,11 +175,11 @@ async function loadFile(/** @type {Event} */ e) {
                         cdiv.appendChild(ccdiv);
                     });
                     cdiv.appendChild(button);
-                }
+                });
                 pElem.appendChild(cdiv);
-            }
+            });
             document.body.appendChild(pElem);
-        }
+        });
     }
 }
 
@@ -127,11 +190,11 @@ function main() {
     input.addEventListener('change', loadFile);
     document.body.appendChild(input);
 
-    textarea = document.createElement('textarea');
-    textarea.cols = 150;
-    textarea.rows = 50;
-    textarea.style.display = 'block';
-    document.body.appendChild(textarea);
+    canvas = document.createElement('canvas');
+    canvas.width = 1080;
+    canvas.height = 720;
+    canvas.style.display = 'block';
+    document.body.appendChild(canvas);
 }
 
 window.addEventListener('DOMContentLoaded', main);
