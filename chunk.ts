@@ -186,10 +186,45 @@ export namespace Chunk {
         }
     }
 
+    export const ART1SOURCE = {
+        CONN_SRC_NONE          : 0x0000,
+        CONN_SRC_LFO           : 0x0001,
+        CONN_SRC_KEYONVELOCITY : 0x0002,
+        CONN_SRC_KEYNUMBER     : 0x0003,
+        CONN_SRC_EG1           : 0x0004,
+        CONN_SRC_EG2           : 0x0005,
+    };
+
+    export const ART1DESTINATION = {
+        CONN_DST_NONE     : 0x0000,
+        CONN_DST_GAIN     : 0x0001,
+        CONN_DST_RESERVED : 0x0002,
+        CONN_DST_PITCH    : 0x0003,
+        CONN_DST_PAN      : 0x0004,
+
+        CONN_LFO_FREQUENCY : 0x0104,
+        CONN_LFO_DELAY     : 0x0105,
+
+        CONN_EG1_ATTACK  : 0x0206,
+        CONN_EG1_DECAY   : 0x0207,
+        CONN_EG1_RESERVED: 0x0208,  // <-- NOTE : これは gm.gls では十中八九SUSTAIN LEVEL
+        CONN_EG1_RELEASE : 0x0209,
+        CONN_EG1_SUSTAIN : 0x020A,  // <-- NOTE : これは gm.gls で何に使われているかよくわからない(使用されている形跡は普通にある)
+
+        CONN_EG2_ATTACK  : 0x030A,
+        CONN_EG2_DECAY   : 0x030B,
+        CONN_EG2_RESERVED: 0x030C,  // <-- NOTE : これは gm/gls ではたぶんSUSTAIN LEVEL
+        CONN_EG2_RELEASE : 0x030D,
+        CONN_EG2_SUSTAIN : 0x030E,
+    }
+
+    export type Art1Source = typeof ART1SOURCE[keyof typeof ART1SOURCE];
+    export type Art1Destination = typeof ART1DESTINATION[keyof typeof ART1DESTINATION];
+
     export class Art1ConnectionBlock {
-        usSource      : number;
+        usSource      : Art1Source;
         usControl     : number;
-        usDestination : number;
+        usDestination : Art1Destination;
         usTransform   : number;
         lScale        : number;
 

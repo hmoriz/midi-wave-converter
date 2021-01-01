@@ -457,6 +457,7 @@ export class Parser{
                 waves,
             });
         });
+        Chunk.ART1SOURCE.CONN_SRC_NONE
         return new ParseResult({
             wpls: wpls,
             instruments: instruments,
