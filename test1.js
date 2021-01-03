@@ -1,5 +1,6 @@
-import { Chunk } from "./chunk";
-import { Parser } from "./parser";
+import { DLS } from "./chunk";
+import { DLSParser } from "./dls";
+import { MIDIParser } from "./midi";
 import { Synthesizer } from "./synthesizer";
 const Chart = require('chart.js');
 
@@ -81,11 +82,11 @@ function makeChart(wpls) {
 
 /** @type {HTMLCanvasElement} */
 let canvas;
-async function loadFile(/** @type {Event} */ e) {
+async function loadDLSFile(/** @type {Event} */ e) {
     for (let i = 0; i < e.target.files.length; i++) {
         /** @type {File} */
         const file = e.target.files[i];
-        const parser = new Parser();
+        const parser = new DLSParser();
         const parseResult = await parser.parseFile(file);
         const {wpls, instrumentIDMap} = parseResult;
 
@@ -115,7 +116,7 @@ async function loadFile(/** @type {Event} */ e) {
                         ccdiv.innerText = '● ' + bankID;
                         ccdiv.appendChild(document.createElement('br'));
                         Object.keys(data.regionMap).forEach((midiID) => {
-                            /** @type {Chunk.RgnChunk} */
+                            /** @type {DLS.RgnChunk} */
                             const regionData = data.regionMap[midiID]; // as Chunk.RgnChunk;
                             const wsmp = regionData.wsmp;
                             const wlnk = regionData.wlnk;
@@ -238,7 +239,7 @@ async function loadFile(/** @type {Event} */ e) {
                                             }
                                             ddx = Math.max(0, Math.min(art1Info.EG2ToPitch, ddx));
                                         }
-                                        dx += ddx / baseBitRate;
+                                        dx -= ddx / baseBitRate;
                                         //console.log(x, dx, ddx, sec, baseBitRate, art1Info.EG2ToPitch);
                                     }
                                     x += dx;
@@ -271,20 +272,20 @@ async function loadFile(/** @type {Event} */ e) {
                                                 if (sec === art1Info.EG1AttackTime) {
                                                     volume = 1.0;
                                                 } else {
-                                                    volume = -Math.log10((sec - art1Info.EG1AttackTime) / decayTime);
+                                                    volume = -Math.log10((sec - art1Info.EG1AttackTime) / decayTime + 0.1);
                                                 }
                                             }
                                             volume = Math.max(volume, art1Info.EG1SustainLevel / 100.0);
                                         } else {
                                             // Sustain or Release Zone
                                             let dVolume = 1.0;
-                                            if (art1Info.EG1DecayTime === 0) {
+                                            if (sec === 0 || decayTime === 0) {
                                                 dVolume = 0;
                                             } else {
                                                 if (sec === art1Info.EG1AttackTime) {
                                                     dVolume = 1.0;
                                                 } else {
-                                                    dVolume = -Math.log10((sec - art1Info.EG1AttackTime) / decayTime);
+                                                    dVolume = -Math.log10((sec - art1Info.EG1AttackTime) / decayTime + 0.1);
                                                 }
                                             }
                                             dVolume = Math.max(dVolume, art1Info.EG1SustainLevel / 100.0);
@@ -294,7 +295,7 @@ async function loadFile(/** @type {Event} */ e) {
                                                 if (sec === noteSec) {
                                                     volume = dVolume;
                                                 } else {
-                                                    volume = -Math.log10((sec - noteSec) / (art1Info.EG1ReleaseTime));
+                                                    volume = -Math.log10((sec - noteSec) / (art1Info.EG1ReleaseTime) + 0.1);
                                                 }
                                             }
                                             volume = Math.min(volume, dVolume);
@@ -305,8 +306,12 @@ async function loadFile(/** @type {Event} */ e) {
                                     // LFO情報を反映
                                     let lfo = 0;
                                     if (art1Info) {
-                                        if (art1Info.LFOPitch > 0 && sec >= art1Info.LFODelay) {
-                                            lfo = Math.sin((sec - art1Info.LFODelay) * Math.PI * 2 / art1Info.LFOFrequency) * (32768 * art1Info.LFOPitch);
+                                        if (art1Info.LFOPitch > 0) {
+                                            // 遅延が存在する場合は遅延時間以降でサインカーブを生成
+                                            // ピッチに依存してボリュームを雑に下げる(遅延以外の部分も込み)
+                                            if (sec >= art1Info.LFODelay) {
+                                                lfo = Math.sin((sec - art1Info.LFODelay) * Math.PI * 2 / art1Info.LFOFrequency) * (32768 * art1Info.LFOPitch);
+                                            }
                                             volume *= 0.5 / art1Info.LFOPitch;
                                         } 
                                     }
@@ -361,12 +366,35 @@ async function loadFile(/** @type {Event} */ e) {
     }
 }
 
+async function loadMIDIFile(/** @type {Event} */ e) {
+    for (let i = 0; i < e.target.files.length; i++) {
+        /** @type {File} */
+        const file = e.target.files[i];
+        const parser = new MIDIParser();
+        const parseResult = await parser.parseFile(file);
+        console.log(parseResult);
+    }
+}
 
 function main() {
+    const div1 = document.createElement('div');
+    div1.innerText = 'gm.dls    ';
     const input = document.createElement('input');
     input.type = 'file';
-    input.addEventListener('change', loadFile);
-    document.body.appendChild(input);
+    input.placeholder = 'gm.dls';
+    input.accept = 'dls';
+    input.addEventListener('change', loadDLSFile);
+    div1.appendChild(input);
+    document.body.appendChild(div1);
+
+    const div2 = document.createElement('div');
+    div2.innerText = 'any midi file (*.mid)    ';
+    const input2 = document.createElement('input');
+    input2.type = 'file';
+    input2.accept = 'mid';
+    input2.addEventListener('change', loadMIDIFile);
+    div2.appendChild(input2);
+    document.body.appendChild(div2);
 
     canvas = document.createElement('canvas');
     canvas.width = 1080;

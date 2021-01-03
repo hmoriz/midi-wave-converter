@@ -1,4 +1,4 @@
-import { Chunk } from "./chunk";
+import { DLS } from "./chunk";
 
 export namespace Synthesizer {
     
@@ -37,44 +37,44 @@ export namespace Synthesizer {
         PitchPerModWheel : number = 0;
     }
     
-    export function getArt1InfoFromLarts(lart?: Chunk.LartChunk) : Art1Info {
+    export function getArt1InfoFromLarts(lart?: DLS.LartChunk) : Art1Info {
         const ret = new Art1Info();
         if (!lart || !lart.art1List) return ret;
         const art1s = lart.art1List;
         art1s.forEach(art1 => {
             art1.connectionBlocks.forEach(cb => {
                 switch (cb.usDestination) {
-                    case Chunk.ART1DESTINATION.CONN_LFO_FREQUENCY:
-                        if (cb.usSource === Chunk.ART1SOURCE.CONN_SRC_NONE) {
+                    case DLS.ART1DESTINATION.CONN_LFO_FREQUENCY:
+                        if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_NONE) {
                             ret.LFOFrequency = getFrequencyFromArt1CentScale(cb.lScale);
                             return;
                         }
                         break;
-                    case Chunk.ART1DESTINATION.CONN_LFO_DELAY:
-                        if (cb.usSource === Chunk.ART1SOURCE.CONN_SRC_NONE) {
+                    case DLS.ART1DESTINATION.CONN_LFO_DELAY:
+                        if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_NONE) {
                             ret.LFODelay = getSecondsFromArt1Scale(cb.lScale);
                             return;
                         }
                         break;
-                    case Chunk.ART1DESTINATION.CONN_EG1_ATTACK:
-                        if (cb.usSource == Chunk.ART1SOURCE.CONN_SRC_NONE) {
+                    case DLS.ART1DESTINATION.CONN_EG1_ATTACK:
+                        if (cb.usSource == DLS.ART1SOURCE.CONN_SRC_NONE) {
                             ret.EG1AttackTime = getSecondsFromArt1Scale(cb.lScale);
                             return;
                         }
                         break;
-                    case Chunk.ART1DESTINATION.CONN_EG1_DECAY:
-                        if (cb.usSource === Chunk.ART1SOURCE.CONN_SRC_NONE) {
+                    case DLS.ART1DESTINATION.CONN_EG1_DECAY:
+                        if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_NONE) {
                             ret.EG1DecayTime = getSecondsFromArt1Scale(cb.lScale);
                             return;
                         }
-                        if (cb.usSource === Chunk.ART1SOURCE.CONN_SRC_KEYNUMBER) {
-                            ret.EG1KeyToDecay = getFrequencyFromArt1CentScale(cb.lScale);
+                        if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_KEYNUMBER) {
+                            ret.EG1KeyToDecay = getSecondsFromArt1Scale(cb.lScale);
                             console.log('CONN_EG1_DECAY', 'CONN_SRC_KEYNUMBER', cb.lScale, getFrequencyFromArt1CentScale(cb.lScale));
                             return;
                         }
                         break;
-                    case Chunk.ART1DESTINATION.CONN_EG1_RESERVED:
-                        if (cb.usSource === Chunk.ART1SOURCE.CONN_SRC_NONE) {
+                    case DLS.ART1DESTINATION.CONN_EG1_RESERVED:
+                        if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_NONE) {
                             // NOTE : おそらくここで定義されているのがSUSTAIN_LEVEL
                             ret.EG1SustainLevel = Math.max(0, Math.min(100.0, cb.lScale / 10));
                             if (cb.lScale < 0 || cb.lScale > 1000) {
@@ -83,38 +83,38 @@ export namespace Synthesizer {
                             return;
                         }
                         break;
-                    case Chunk.ART1DESTINATION.CONN_EG1_RELEASE:
-                        if (cb.usSource === Chunk.ART1SOURCE.CONN_SRC_NONE) {
+                    case DLS.ART1DESTINATION.CONN_EG1_RELEASE:
+                        if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_NONE) {
                             ret.EG1ReleaseTime = getSecondsFromArt1Scale(cb.lScale);
                             return;
                         }
                         break;
-                    case Chunk.ART1DESTINATION.CONN_EG1_SUSTAIN:
-                        if (cb.usSource === Chunk.ART1SOURCE.CONN_SRC_NONE) {
+                    case DLS.ART1DESTINATION.CONN_EG1_SUSTAIN:
+                        if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_NONE) {
                             ret.EG1ReservedTime = getSecondsFromArt1Scale(cb.lScale);
-                            console.log('CONN_EG1_SUSTAIN', cb.lScale, getSecondsFromArt1Scale(cb.lScale));
+                            console.warn('CONN_EG1_SUSTAIN', cb.lScale, getSecondsFromArt1Scale(cb.lScale));
                             return;
                         }
                         break;
-                    case Chunk.ART1DESTINATION.CONN_EG2_ATTACK:
-                        if (cb.usSource === Chunk.ART1SOURCE.CONN_SRC_NONE) {
+                    case DLS.ART1DESTINATION.CONN_EG2_ATTACK:
+                        if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_NONE) {
                             ret.EG2AttackTime = getSecondsFromArt1Scale(cb.lScale);
                             return;
                         }
                         break;
-                    case Chunk.ART1DESTINATION.CONN_EG2_DECAY:
-                        if (cb.usSource === Chunk.ART1SOURCE.CONN_SRC_NONE) {
+                    case DLS.ART1DESTINATION.CONN_EG2_DECAY:
+                        if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_NONE) {
                             ret.EG2DecayTime = getSecondsFromArt1Scale(cb.lScale);
                             return;
                         }
-                        if (cb.usSource === Chunk.ART1SOURCE.CONN_SRC_KEYNUMBER) {
-                            ret.EG2KeyToDecay = getFrequencyFromArt1CentScale(cb.lScale);
-                            console.log('CONN_EG2_DECAY', 'CONN_SRC_KEYNUMBER', cb.lScale, getFrequencyFromArt1CentScale(cb.lScale));
+                        if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_KEYNUMBER) {
+                            ret.EG2KeyToDecay = getSecondsFromArt1Scale(cb.lScale);
+                            console.warn('CONN_EG2_DECAY', 'CONN_SRC_KEYNUMBER', cb.lScale, getFrequencyFromArt1CentScale(cb.lScale));
                             return;
                         }
                         break;
-                    case Chunk.ART1DESTINATION.CONN_EG2_RESERVED:
-                        if (cb.usSource === Chunk.ART1SOURCE.CONN_SRC_NONE) {
+                    case DLS.ART1DESTINATION.CONN_EG2_RESERVED:
+                        if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_NONE) {
                             // NOTE : おそらくここで定義されているのがSUSTAIN_LEVEL
                             ret.EG2SustainLevel = Math.max(0, Math.min(100.0, cb.lScale / 10));
                             if (cb.lScale < 0 || cb.lScale > 1000) {
@@ -123,26 +123,26 @@ export namespace Synthesizer {
                             return;
                         }
                         break;
-                    case Chunk.ART1DESTINATION.CONN_EG2_RELEASE:
-                        if (cb.usSource === Chunk.ART1SOURCE.CONN_SRC_NONE) {
+                    case DLS.ART1DESTINATION.CONN_EG2_RELEASE:
+                        if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_NONE) {
                             ret.EG2ReleaseTime = getSecondsFromArt1Scale(cb.lScale);
                             return;
                         }
                         break;
-                    case Chunk.ART1DESTINATION.CONN_EG2_SUSTAIN:
-                        if (cb.usSource === Chunk.ART1SOURCE.CONN_SRC_NONE) {
+                    case DLS.ART1DESTINATION.CONN_EG2_SUSTAIN:
+                        if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_NONE) {
                             ret.EG2ReservedTime = getSecondsFromArt1Scale(cb.lScale);
-                            console.log('CONN_EG2_SUSTAIN', cb.lScale, getSecondsFromArt1Scale(cb.lScale));
+                            console.warn('CONN_EG2_SUSTAIN', cb.lScale, getSecondsFromArt1Scale(cb.lScale));
                             return;
                         }
                         break;
-                    case Chunk.ART1DESTINATION.CONN_DST_PITCH:
-                        if (cb.usSource === Chunk.ART1SOURCE.CONN_SRC_LFO) {
+                    case DLS.ART1DESTINATION.CONN_DST_PITCH:
+                        if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_LFO) {
                             // LFO Pitch
                             ret.LFOPitch = getFrequencyFromArt1CentScale(cb.lScale);
                             return;
                         }
-                        if (cb.usSource === Chunk.ART1SOURCE.CONN_SRC_EG2) {
+                        if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_EG2) {
                             // EG2 Value to Pitch (max pitch delta)
                             ret.EG2ToPitch = getFrequencyFromArt1CentScale(cb.lScale);
                             return;

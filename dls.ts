@@ -1,18 +1,18 @@
-import { Chunk } from "./chunk";
+import { DLS } from "./chunk";
 
 export type DataForMap = {
-    insChunk : Chunk.InsChunk;
+    insChunk : DLS.InsChunk;
     regionMap : Object;
     waves : Array<{
         id : number,
-        wave : Chunk.Chunk;
+        wave : DLS.Chunk;
     }>;
 };
 
 class ParseResult {
-    wpls            : Chunk.WvplChunk;
-    instruments     : Chunk.LinsChunk;
-    chunks          : Array<Chunk.Chunk>;
+    wpls            : DLS.WvplChunk;
+    instruments     : DLS.LinsChunk;
+    chunks          : Array<DLS.Chunk>;
     instrumentIDMap : Map<number, Map<String, Map<Number, DataForMap>>>;
 
     constructor(data : Partial<ParseResult>) {
@@ -20,7 +20,7 @@ class ParseResult {
     }
 };
 
-export class Parser{
+export class DLSParser{
     frequencyTable : Array<number>;
 
     constructor() {
@@ -65,7 +65,7 @@ export class Parser{
             if (getString(offset+8, 4) !== 'lrgn') {
                 throw new Error('not lrgn Chunk : ' + getString(offset + 8, 4))
             }
-            const lrgn = new Chunk.LrgnChunk(offset); 
+            const lrgn = new DLS.LrgnChunk(offset); 
             let subOffset = offset + 12;
             while (subOffset < offset + 8 + listSize) {
                 const subKey = getString(subOffset, 4);
@@ -74,12 +74,12 @@ export class Parser{
                     const lrgnSubKey = getString(subOffset+8, 4);
                     if (lrgnSubKey === 'rgn ') {
                         let rgnSubOffset = subOffset + 12;
-                        const rgn = new Chunk.RgnChunk(rgnSubOffset, lrgnSize);
+                        const rgn = new DLS.RgnChunk(rgnSubOffset, lrgnSize);
                         while (rgnSubOffset < subOffset + 8 + lrgnSize) {
                             const rgnSubKey = getString(rgnSubOffset, 4);
                             const rgnSubSize = data.getUint32(rgnSubOffset + 4, true);
                             if (rgnSubKey === 'rgnh') {
-                                const rgnh = new Chunk.RgnhChunk(rgnSubOffset, rgnSubSize, {
+                                const rgnh = new DLS.RgnhChunk(rgnSubOffset, rgnSubSize, {
                                     rangeKey: {
                                         usLow : data.getUint16(rgnSubOffset + 8 , true),
                                         usHigh: data.getUint16(rgnSubOffset + 10, true),
@@ -96,7 +96,7 @@ export class Parser{
                                 }
                                 rgn.rgnh = rgnh;
                             } else if (rgnSubKey === 'wsmp') {
-                                const wsmp = new Chunk.WsmpChunk(rgnSubOffset, rgnSubSize, {
+                                const wsmp = new DLS.WsmpChunk(rgnSubOffset, rgnSubSize, {
                                     cbSize      : data.getUint32(rgnSubOffset + 8 , true),
                                     usUnityNote : data.getUint16(rgnSubOffset + 12, true),
                                     sFineTune   : data.getInt16 (rgnSubOffset + 14, true),
@@ -118,7 +118,7 @@ export class Parser{
                                 }
                                 rgn.wsmp = wsmp;
                             } else if (rgnSubKey === 'wlnk') {
-                                const wlnk = new Chunk.WlnkChunk(rgnSubOffset, rgnSubSize, {
+                                const wlnk = new DLS.WlnkChunk(rgnSubOffset, rgnSubSize, {
                                     fusOptions   : data.getUint16(rgnSubOffset + 8 , true),
                                     usPhaseGroup : data.getUint16(rgnSubOffset + 10, true),
                                     ulChannel    : data.getUint32(rgnSubOffset + 12, true),
@@ -161,19 +161,19 @@ export class Parser{
             if (getString(offset+8, 4) !== 'lart') {
                 throw new Error('not lart Chunk : ' + getString(offset + 8, 4))
             }
-            const lart = new Chunk.LartChunk(offset);
+            const lart = new DLS.LartChunk(offset);
             let subOffset = offset + 12;
             while (subOffset < offset + 8 + listSize) {
                 const subKey = getString(subOffset, 4);
                 const subSize = data.getUint32(subOffset + 4, true);
                 if (subKey === 'art1') {
-                    const art1Chunk = new Chunk.Art1Chunk(subOffset, subSize, {
+                    const art1Chunk = new DLS.Art1Chunk(subOffset, subSize, {
                         cbSize: data.getUint32(subOffset + 8, true),
                         cConnectionBlocks: data.getUint32(subOffset + 12, true),
                     });
                     for (let i = 0; i < art1Chunk.cConnectionBlocks; i++) {
                         const connectionBlockOffset = subOffset + 16 + i * 12;
-                        const connectionBlock = new Chunk.Art1ConnectionBlock({
+                        const connectionBlock = new DLS.Art1ConnectionBlock({
                             usSource     : data.getUint16(connectionBlockOffset    , true),
                             usControl    : data.getUint16(connectionBlockOffset + 2, true),
                             usDestination: data.getUint16(connectionBlockOffset + 4, true),
@@ -197,7 +197,7 @@ export class Parser{
             if (getString(offset+8, 4) !== 'lins') {
                 throw new Error('not lins Chunk : ' + getString(offset + 8, 4))
             }
-            const linsChunk = new Chunk.LinsChunk(offset);
+            const linsChunk = new DLS.LinsChunk(offset);
             let subOffset = offset + 12;
             while (subOffset < offset + 8 + listSize) {
                 const subKey = getString(subOffset, 4);
@@ -205,13 +205,13 @@ export class Parser{
                     const listSize = data.getUint32(subOffset +4, true);
                     const listSubKey = getString(subOffset+8, 4);
                     if (listSubKey === 'ins ') {
-                        const ins = new Chunk.InsChunk(subOffset + 8, listSize);
+                        const ins = new DLS.InsChunk(subOffset + 8, listSize);
                         let insSubOffset = subOffset + 12;
                         while (insSubOffset < subOffset + listSize) {
                             const insSubKey = getString(insSubOffset, 4);
                             const insSubSize = data.getUint32(insSubOffset + 4, true);
                             if (insSubKey === 'insh') {
-                                const insh = new Chunk.InshChunk(insSubOffset, insSubSize, {
+                                const insh = new DLS.InshChunk(insSubOffset, insSubSize, {
                                     cRegions: data.getUint32(insSubOffset + 8, true),
                                     Locale: {
                                         ulBank      : data.getUint32(insSubOffset + 12, true),
@@ -241,7 +241,7 @@ export class Parser{
                                     ins.lart = lart;
                                 } else if (insListSubKey === 'INFO') {
                                     let listSubOffset = insSubOffset + 12;
-                                    const infoChunk = new Chunk.InfoChunk(insSubOffset, insSubSize);
+                                    const infoChunk = new DLS.InfoChunk(insSubOffset, insSubSize);
                                     while(listSubOffset <= insSubOffset + insSubSize + 4) {
                                         const infoKey = getString(listSubOffset, 4);
                                         let infoSize = data.getUint32(listSubOffset + 4, true);
@@ -284,7 +284,7 @@ export class Parser{
             if (getString(offset+8, 4) !== 'wvpl') {
                 throw new Error('not wvpl Chunk : ' + getString(offset + 8, 4))
             }
-            const wvplChunk = new Chunk.WvplChunk(offset);
+            const wvplChunk = new DLS.WvplChunk(offset);
             let subOffset = offset + 12;
             while (subOffset < offset + 8 + listSize) {
                 const wvplSubKey = getString(subOffset, 4);
@@ -318,7 +318,7 @@ export class Parser{
                         // div.innerText = waveIndex++;
                         // document.body.appendChild(div);
                         // div.appendChild(audio);
-                        const waveChunk = new Chunk.WaveChunk(subOffset + 8, wvplSubSize, {
+                        const waveChunk = new DLS.WaveChunk(subOffset + 8, wvplSubSize, {
                             rawData: wave,
                             segmentData: segment,
                             waveData: blob,
@@ -352,7 +352,7 @@ export class Parser{
             }
             if (subKey === 'INFO') {
                 let listSubOffset = offset + 12;
-                const infoChunk = new Chunk.InfoChunk(offset + 8, size-4);
+                const infoChunk = new DLS.InfoChunk(offset + 8, size-4);
                 while(listSubOffset < offset + size) {
                     const infoKey = getString(listSubOffset, 4);
                     let infoSize = data.getUint32(listSubOffset + 4, true);
@@ -375,7 +375,7 @@ export class Parser{
                 return getListChunk(offset);
             }
             if (key === 'ptbl') {
-                const ptbl = new Chunk.PtblChunk(offset, size, {
+                const ptbl = new DLS.PtblChunk(offset, size, {
                     cbSize: data.getUint32(offset + 8 , true),
                     cCues:  data.getUint32(offset + 12, true),
                 });
@@ -385,7 +385,7 @@ export class Parser{
                 }
                 return ptbl;
             }
-            const chunk = new Chunk.VarChunk(key, offset, size);
+            const chunk = new DLS.VarChunk(key, offset, size);
             chunk.rawData = arrayBuffer.slice(offset + 8, offset + 8 + size);
             return chunk;
         };
@@ -400,7 +400,7 @@ export class Parser{
             return;
         }
         const globalOffset = 12;
-        const chunks = new Array<Chunk.Chunk>();
+        const chunks = new Array<DLS.Chunk>();
         let offset = globalOffset;
         while (offset <= globalSize) {
             const chunk = getChunk(offset);
@@ -409,8 +409,8 @@ export class Parser{
             offset += 8 + Number(chunk.size);
         }
 
-        const wpls = chunks.find((chunk) => chunk instanceof Chunk.WvplChunk) as Chunk.WvplChunk;
-        const instruments = chunks.find((chunk) => chunk instanceof Chunk.LinsChunk) as Chunk.LinsChunk;
+        const wpls = chunks.find((chunk) => chunk instanceof DLS.WvplChunk) as DLS.WvplChunk;
+        const instruments = chunks.find((chunk) => chunk instanceof DLS.LinsChunk) as DLS.LinsChunk;
         const instrumentIDMap = new Map<number, Map<String, Map<Number, DataForMap>>>();
         instruments.insList.forEach((insChunk) => {
             const insh = insChunk.insh;
@@ -457,7 +457,7 @@ export class Parser{
                 waves,
             });
         });
-        Chunk.ART1SOURCE.CONN_SRC_NONE
+        DLS.ART1SOURCE.CONN_SRC_NONE
         return new ParseResult({
             wpls: wpls,
             instruments: instruments,

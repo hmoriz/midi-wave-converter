@@ -1,4 +1,4 @@
-export namespace Chunk {
+export namespace DLS {
 
     export abstract class Chunk {
         key   : String;
@@ -213,7 +213,7 @@ export namespace Chunk {
 
         CONN_EG2_ATTACK  : 0x030A,
         CONN_EG2_DECAY   : 0x030B,
-        CONN_EG2_RESERVED: 0x030C,  // <-- NOTE : これは gm/gls ではたぶんSUSTAIN LEVEL
+        CONN_EG2_RESERVED: 0x030C,  // <-- NOTE : これは gm.gls ではたぶんSUSTAIN LEVEL
         CONN_EG2_RELEASE : 0x030D,
         CONN_EG2_SUSTAIN : 0x030E,
     }
@@ -275,6 +275,99 @@ export namespace Chunk {
 
         constructor(offset : number, size: number, data?: Partial<WaveChunk>) {
             super('wave', offset, size);
+            Object.assign(this, data);
+        }
+    }
+}
+
+export namespace MIDI {
+
+    export abstract class Chunk {
+        key    : string;
+        offset : number;
+        size   : number;
+
+        constructor(key : string, offset : number, size : number) {
+            this.key = key;
+            this.offset = offset;
+            this.size = size;
+        }
+    }
+
+    export class MThdChunk extends Chunk {
+        format   : number;
+        nTracks  : number;
+        division : number;
+
+        constructor(offset : number, size : number, data? : Partial<MThdChunk>) {
+            super('MThd', offset, size);
+            if (size !== 6) {
+                console.warn('unknown MThd Chunk size', size);
+            }
+            Object.assign(this, data);
+        }
+    }
+
+    export class MTrkChunk extends Chunk {
+        Events : Array<MTrkEvent>;
+        constructor(offset : number, size : number) {
+            super('MTrk', offset, size);
+            this.Events = new Array();
+        }
+    }
+
+    export class MTrkEvent {
+        offset : number;
+        deltaTime : number;
+        event : MIDIEvent | SysExEvent | MetaEvent;
+
+        constructor(data? : Partial<MTrkEvent>) {
+            Object.assign(this, data);
+        }
+    }
+
+    export class MIDIEvent {
+        length   : number;
+        channel  : number;
+        note     : number;
+        velocity : number;
+        value: Uint8Array;
+    }
+
+    export class SysExEvent {
+        escapingType : boolean;
+        length: number;
+        value: Uint8Array;
+    }
+
+    export const METAEVENTTYPE = {
+        SEQUENCE_NUMBER : 0x00,
+        TEXT            : 0x01,
+        COPYRIGHT       : 0x02,
+        TRACKNAME       : 0x03,
+        INSTRUMENT_NAME : 0x04,
+        LYRICS          : 0x05,
+        MARKER          : 0x06,
+        CUE_POINT       : 0x07,
+
+        CHANNEL_PREFIX  : 0x20,
+        END_OF_TRACK    : 0x2F,
+
+        SET_TEMPO       : 0x51,
+        SMPTE_OFFSET    : 0x54,
+        TIME_SIGNATURE  : 0x58,
+        KEY_SIGNATURE   : 0x59,
+    }
+
+    export type MetaEventType = typeof METAEVENTTYPE[keyof typeof METAEVENTTYPE];
+
+    export class MetaEvent {
+        metaEventType : MetaEventType;
+        length        : number;
+        textValue     : string;
+        value         : Uint8Array;
+
+        constructor(data? : Partial<MetaEvent>) {
             Object.assign(this, data);
         }
     }
