@@ -2,7 +2,7 @@ import { DLS } from "./chunk";
 
 export type InstrumentData = {
     insChunk : DLS.InsChunk;
-    regionMap : Map<number, DLS.RgnChunk>;
+    regionMap : Map<number, Map<number, DLS.RgnChunk>>; // noteID -> velocity -> RGN
     waves : Array<{
         id : number,
         wave : DLS.WaveChunk;
@@ -463,7 +463,7 @@ export class DLSParser{
             }
             const bankID = locale.ulBank;
             const lrgn = insChunk.lrgn;
-            const regionMap = new Map<number, DLS.RgnChunk>();
+            const regionMap = new Map<number, Map<number, DLS.RgnChunk>>();
             let waves = new Array();
             lrgn.rgnList.forEach((rgn) => {
                 const rgnh = rgn.rgnh;
@@ -471,24 +471,29 @@ export class DLSParser{
                     console.log('not found rgnh for', rgn);
                     return;
                 }
-                const keylow =  rgnh.rangeKey.usLow;
+                const keylow  =  rgnh.rangeKey.usLow;
                 const keyHigh = rgnh.rangeKey.usHigh;
+                const velocityLow  = rgnh.rangeVelocity.usLow;
+                const velocityHigh = rgnh.rangeVelocity.usHigh
                 const wlnk = rgn.wlnk;
                 waves.push({id: wlnk.ulTableIndex, wave: wpls.waveList[wlnk.ulTableIndex]});
                 for (let i = keylow; i <= keyHigh; i++) {
-                    regionMap.set(i, rgn);
+                    regionMap.set(i, new Map<number, DLS.RgnChunk>());
+                    for (let j = velocityLow; j <= velocityHigh; j++) {
+                        regionMap.get(i).set(j, rgn);
+                    }
                 }
             })
-            //console.log(i, instrument, inam, regions, locale, lrgn, regionMap);
+            // console.log(instrumentID, inam, locale, lrgn, regionMap);
             instrumentNameIDBankMap.get(instrumentID).get(inam).set(bankID, {
-                insChunk,
-                regionMap,
-                waves,
+                insChunk: insChunk,
+                regionMap: regionMap,
+                waves : waves,
             });
             instrumentIDMap.get(instrumentID).set(bankID, {
-                insChunk,
-                regionMap,
-                waves,
+                insChunk : insChunk,
+                regionMap : regionMap,
+                waves : waves,
             })
         });
         DLS.ART1SOURCE.CONN_SRC_NONE

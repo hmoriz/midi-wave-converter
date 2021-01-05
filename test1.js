@@ -1,4 +1,3 @@
-import { DLS } from "./chunk";
 import { DLSParser, ParseResult as DLSParseResult } from "./dls";
 import { MIDIParser } from "./midi";
 import { Synthesizer } from "./synthesizer";
@@ -109,13 +108,13 @@ async function loadDLSFile(/** @type {Event} */ e) {
         const parser = new DLSParser();
         const parseResult = await parser.parseFile(file);
         dlsParseResult = parseResult;
-        const {wpls, instrumentIDNameBankMap: instrumentIDMap} = parseResult;
+        const {wpls, instrumentIDNameBankMap, instrumentIDMap} = parseResult;
 
         console.log(instrumentIDMap);
 
         makeChart(wpls);
 
-        instrumentIDMap.forEach((inamBankIDDataMap, id) => {
+        instrumentIDNameBankMap.forEach((inamBankIDDataMap, id) => {
             const pElem = document.createElement('p');
             pElem.innerText = id;
             inamBankIDDataMap.forEach((bankIDDataMap, inam) => {
@@ -132,11 +131,12 @@ async function loadDLSFile(/** @type {Event} */ e) {
                     const button = document.createElement('button');
                     button.innerText = bankID;
                     button.addEventListener('click', () => {
-                        console.log(inam, bankID, data.regionMap.get(69), lart?.art1List);
+                        console.log(inam, bankID, data.regionMap.get(69).get(100), lart?.art1List);
                         const ccdiv = document.createElement('div');
                         ccdiv.innerText = '● ' + bankID;
                         ccdiv.appendChild(document.createElement('br'));
-                        data.regionMap.forEach((regionData, midiID) => {
+                        data.regionMap.forEach((velocityRegionDataMap, midiID) => {
+                            const regionData = velocityRegionDataMap.get(100); // 数が多すぎるので
                             const wsmp = regionData.wsmp;
                             const wlnk = regionData.wlnk;
                             // const lart = regionData.lart;

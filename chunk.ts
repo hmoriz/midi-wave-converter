@@ -333,7 +333,7 @@ export namespace MIDI {
         channel  : number;
 
         isNoteEvent : boolean = false;
-        note        : number  = 0;
+        noteID      : number  = 0;
         velocity    : number  = 0;
 
         isControlEvent : boolean = false;

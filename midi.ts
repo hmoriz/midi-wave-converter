@@ -49,13 +49,13 @@ export class MIDIParser {
             console.error("Unknown command" + command.toString(16));
         } else if (0x80 <= command && command <= 0x8F) {
             // NOTE_OFF
-            e.note = 0;
+            e.noteID = 0;
             e.velocity = 0;
             e.length = 3;
         } else if (0x90 <= command && command <= 0x9F) {
             // NOTE_ON
             e.isNoteEvent = true;
-            e.note = this._data.getUint8(offset + 1);
+            e.noteID = this._data.getUint8(offset + 1);
             e.velocity = this._data.getUint8(offset + 2);
             e.length = 3;
         } else if (0xA0 <= command && command <= 0xAF) {
