@@ -269,9 +269,11 @@ export namespace DLS {
     }
 
     export class WaveChunk extends Chunk {
-        rawData     : ArrayBuffer;
-        segmentData : Uint8Array;
-        waveData    : Blob;
+        rawData        : ArrayBuffer;
+        bytesPerSecond : number;
+        segmentData    : Uint8Array;
+        pcmData        : Int16Array;
+        waveData       : Blob;
 
         constructor(offset : number, size: number, data?: Partial<WaveChunk>) {
             super('wave', offset, size);
@@ -329,8 +331,19 @@ export namespace MIDI {
     export class MIDIEvent {
         length   : number;
         channel  : number;
-        note     : number;
-        velocity : number;
+
+        isNoteEvent : boolean = false;
+        note        : number  = 0;
+        velocity    : number  = 0;
+
+        isControlEvent : boolean = false;
+        controlCommand : number  = 0;
+        value1         : number  = 0;
+        value2         : number  = 0;
+
+        isProgramChangeEvent : boolean = false;
+        programID : number = 0;
+
         value: Uint8Array;
     }
 

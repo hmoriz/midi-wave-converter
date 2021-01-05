@@ -1,24 +1,29 @@
 import { DLS } from "./chunk";
 
-export type DataForMap = {
+export type InstrumentData = {
     insChunk : DLS.InsChunk;
-    regionMap : Object;
+    regionMap : Map<number, DLS.RgnChunk>;
     waves : Array<{
         id : number,
-        wave : DLS.Chunk;
+        wave : DLS.WaveChunk;
     }>;
 };
 
-class ParseResult {
-    wpls            : DLS.WvplChunk;
-    instruments     : DLS.LinsChunk;
-    chunks          : Array<DLS.Chunk>;
-    instrumentIDMap : Map<number, Map<String, Map<Number, DataForMap>>>;
+export class ParseResult {
+    wpls                    : DLS.WvplChunk;
+    instruments             : DLS.LinsChunk;
+    chunks                  : Array<DLS.Chunk>;
+    instrumentIDNameBankMap : Map<number, Map<String, Map<number, InstrumentData>>>; // instrumentID -> Instrument Name -> BankID -> Data(For Debug)
+    instrumentIDMap         : Map<number, Map<number, InstrumentData>>; // instrumentID -> BankID -> Data
 
     constructor(data : Partial<ParseResult>) {
         Object.assign(this, data);
     }
 };
+
+export function getFrequencyFromNoteID(id : number) {
+    return 440 * (2.0 ** ((id - 69) / 12.0)) + 0.5;
+}
 
 export class DLSParser{
     frequencyTable : Array<number>;
@@ -27,7 +32,7 @@ export class DLSParser{
         // MIDI音階 -> Hz
         this.frequencyTable = new Array<number>();
         for (let i = 0; i < 128; i++) {
-            this.frequencyTable[i] = 440 * (2.0 ** ((i - 69) / 12.0)) + 0.5;
+            this.frequencyTable[i] = getFrequencyFromNoteID(i);
         }
     }
 
@@ -311,6 +316,7 @@ export class DLSParser{
                         segment.set(['E'.charCodeAt(0)], 11);
                         segment.set([...(new Uint8Array(wave))], 12);
                         const blob = new Blob([segment], { type: 'audio/wav' });
+                        // // for debug
                         // const audio = document.createElement('audio');
                         // audio.src = blobURL;
                         // audio.controls = true;
@@ -318,9 +324,28 @@ export class DLSParser{
                         // div.innerText = waveIndex++;
                         // document.body.appendChild(div);
                         // div.appendChild(audio);
+                        let dataChunkID = getString(subOffset + 82, 4); // Maybe 'data'
+                        let pcmDataSize = 0;
+                        let dataOffset = 0;
+                        if (dataChunkID === 'data') {
+                            pcmDataSize = data.getUint32(subOffset + 86, true); // 8 + 78 <- wave DATA size
+                            dataOffset = 90;
+                        } else {
+                            let dataChunkID = getString(subOffset + 66, 4); // Maybe 'data'
+                            if (dataChunkID === 'data') {
+                                pcmDataSize = data.getUint32(subOffset + 70, true); // 8 + 62 <- wave DATA size
+                                dataOffset = 74;
+                            }
+                        }
+                        const pcmData = new Int16Array(pcmDataSize / 2);
+                        for(let pcmOffset = 0; pcmOffset < pcmData.length; pcmOffset++) {
+                            pcmData.set([data.getInt16(subOffset + dataOffset + pcmOffset * 2, true)], pcmOffset);
+                        }
                         const waveChunk = new DLS.WaveChunk(subOffset + 8, wvplSubSize, {
                             rawData: wave,
+                            bytesPerSecond: data.getUint32(subOffset + 24, true), // 8 + 16 <- sample byte/sec rate (ex. 44100 Hz)
                             segmentData: segment,
+                            pcmData: pcmData,
                             waveData: blob,
                         });
                         wvplChunk.addChild(waveChunk);
@@ -411,7 +436,8 @@ export class DLSParser{
 
         const wpls = chunks.find((chunk) => chunk instanceof DLS.WvplChunk) as DLS.WvplChunk;
         const instruments = chunks.find((chunk) => chunk instanceof DLS.LinsChunk) as DLS.LinsChunk;
-        const instrumentIDMap = new Map<number, Map<String, Map<Number, DataForMap>>>();
+        const instrumentNameIDBankMap = new Map<number, Map<String, Map<number, InstrumentData>>>();
+        const instrumentIDMap = new Map<number, Map<number, InstrumentData>>();
         instruments.insList.forEach((insChunk) => {
             const insh = insChunk.insh;
             const inshData = insh.Locale
@@ -421,6 +447,9 @@ export class DLSParser{
                 return;
             }
             const instrumentID = locale.ulInstrument;
+            if (!instrumentNameIDBankMap.get(instrumentID)) {
+                instrumentNameIDBankMap.set(instrumentID, new Map());
+            }
             if (!instrumentIDMap.get(instrumentID)) {
                 instrumentIDMap.set(instrumentID, new Map());
             }
@@ -429,12 +458,12 @@ export class DLSParser{
                 console.log('missing inam for', insChunk);
                 return;
             }
-            if (!instrumentIDMap.get(instrumentID).get(inam)) {
-                instrumentIDMap.get(instrumentID).set(inam, new Map());
+            if (!instrumentNameIDBankMap.get(instrumentID).get(inam)) {
+                instrumentNameIDBankMap.get(instrumentID).set(inam, new Map());
             }
             const bankID = locale.ulBank;
             const lrgn = insChunk.lrgn;
-            const regionMap = {};
+            const regionMap = new Map<number, DLS.RgnChunk>();
             let waves = new Array();
             lrgn.rgnList.forEach((rgn) => {
                 const rgnh = rgn.rgnh;
@@ -442,27 +471,33 @@ export class DLSParser{
                     console.log('not found rgnh for', rgn);
                     return;
                 }
-                const low =  rgnh.rangeKey.usLow;
-                const high = rgnh.rangeKey.usHigh;
+                const keylow =  rgnh.rangeKey.usLow;
+                const keyHigh = rgnh.rangeKey.usHigh;
                 const wlnk = rgn.wlnk;
                 waves.push({id: wlnk.ulTableIndex, wave: wpls.waveList[wlnk.ulTableIndex]});
-                for (let i = low; i <= high; i++) {
-                    regionMap[i] = rgn;
+                for (let i = keylow; i <= keyHigh; i++) {
+                    regionMap.set(i, rgn);
                 }
             })
             //console.log(i, instrument, inam, regions, locale, lrgn, regionMap);
-            instrumentIDMap.get(instrumentID).get(inam).set(bankID, {
+            instrumentNameIDBankMap.get(instrumentID).get(inam).set(bankID, {
                 insChunk,
                 regionMap,
                 waves,
             });
+            instrumentIDMap.get(instrumentID).set(bankID, {
+                insChunk,
+                regionMap,
+                waves,
+            })
         });
         DLS.ART1SOURCE.CONN_SRC_NONE
         return new ParseResult({
             wpls: wpls,
             instruments: instruments,
             chunks : chunks, 
-            instrumentIDMap : instrumentIDMap,
+            instrumentIDNameBankMap : instrumentNameIDBankMap,
+            instrumentIDMap: instrumentIDMap,
         });
     }
 };

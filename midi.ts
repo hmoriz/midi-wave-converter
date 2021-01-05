@@ -54,17 +54,22 @@ export class MIDIParser {
             e.length = 3;
         } else if (0x90 <= command && command <= 0x9F) {
             // NOTE_ON
+            e.isNoteEvent = true;
             e.note = this._data.getUint8(offset + 1);
             e.velocity = this._data.getUint8(offset + 2);
             e.length = 3;
         } else if (0xA0 <= command && command <= 0xAF) {
             // POLYPHONIC_KEY_PRESSURE
+            e.isNoteEvent = true;
             e.length = 3;
             console.warn('Unknown', offset.toString(16));
         } else if (0xB0 <= command && command <= 0xBF) {
             // CONTROL_CHANGE
+            e.isControlEvent = true;
             const subCommand = this._data.getUint8(offset + 1);
-            e.note = subCommand;
+            e.controlCommand = subCommand;
+            e.value1 = this._data.getUint8(offset + 2);
+            e.value2 = 0;
             e.length = 3;
             if (subCommand === 0) {
             } else if (0x01 <= subCommand && subCommand <= 0x1F) {
@@ -80,6 +85,8 @@ export class MIDIParser {
         } else if (0xC0 <= command && command <= 0xCF) {
             // PROGRAM_CHANGE
             e.length = 2;
+            e.isProgramChangeEvent = true;
+            e.programID = this._data.getUint8(offset + 1);
         } else if (0xD0 <= command && command <= 0xDF) {
             // 
             e.length = 2;
@@ -88,6 +95,7 @@ export class MIDIParser {
         } else {
             console.warn('Unknown', offset.toString(16));
         }
+        e.value = (new Uint8Array(this._arrayBuffer)).slice(offset, offset+e.length);
         return e;
     }
 
@@ -100,7 +108,7 @@ export class MIDIParser {
             length: this._data.getUint8(offset + 2),
         });
         e.textValue = this._getString(offset + 3, e.length);
-        e.value = (new Uint8Array(this._arrayBuffer)).slice(offset + 3, offset + 2 + e.length);
+        e.value = (new Uint8Array(this._arrayBuffer)).slice(offset + 3, offset + 3 + e.length);
         return e;
     }
 

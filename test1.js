@@ -1,5 +1,5 @@
 import { DLS } from "./chunk";
-import { DLSParser } from "./dls";
+import { DLSParser, ParseResult as DLSParseResult } from "./dls";
 import { MIDIParser } from "./midi";
 import { Synthesizer } from "./synthesizer";
 const Chart = require('chart.js');
@@ -20,29 +20,8 @@ function setLittleEndianNumberToUint8Array(/**@type {Uint8Array} */data, offset,
 
 function makeChart(wpls) {
     const datasets = new Array();
-    wpls.waveList.forEach((wpl) => {
-        if (datasets.length >= 4)return;
-        const segment = wpl.segmentData;
-        const waveData = new Uint8Array(segment.slice(90));
-        const waveValues = new Array();
-        for (let i = 0; i < Math.min(waveData.length / 2, 1000); i++ ){
-            let v = getLittleEndianNumberFromUint8Array(waveData, i * 2, 2);
-            if (v > 32768) {
-                v = -((65536 - v) & 32767);
-            }
-            if (v === 32768) {v = -v}
-            waveValues.push(v);
-        }
-        datasets.push({
-            label: (datasets.length + 1).toString(),
-            data: waveValues,
-            borderColor: `rgb(${Math.round(Math.random() * 256)}, ${Math.round(Math.random() * 256)}, ${Math.round(Math.random() * 256)})`,
-            backgroundColor: "rgba(0,0,0,0)",
-        })
-    });
-    console.log(datasets);
     const labels = new Array();
-    for (let i = 0; i < 1000; i++) {
+    for (let i = 0; i < 100000; i++) {
         labels.push(i.toString());
     }
     const c = new Chart(canvas, 
@@ -76,19 +55,61 @@ function makeChart(wpls) {
             }
         }
     );
+    window.c = c;
+    wpls.waveList.forEach((wpl) => {
+        if (datasets.length >= 4)return;
+        const segment = wpl.segmentData;
+        const waveData = new Uint8Array(segment.slice(90));
+        const waveValues = new Array();
+        for (let i = 0; i < Math.min(waveData.length / 2, 1000); i++ ){
+            let v = getLittleEndianNumberFromUint8Array(waveData, i * 2, 2);
+            if (v > 32768) {
+                v = -((65536 - v) & 32767);
+            }
+            if (v === 32768) {v = -v}
+            waveValues.push(v);
+        }
+        addChart(c, waveValues)
+    });
     console.log(c);
     return c;
 }
 
+function addChart(/** @type {Chart} */c, dataArray) {
+    c.data.datasets.push({
+        label: (c.data.datasets.length + 1).toString(),
+        data: dataArray,
+        borderColor: `rgb(${Math.round(Math.random() * 256)}, ${Math.round(Math.random() * 256)}, ${Math.round(Math.random() * 256)})`,
+        backgroundColor: "rgba(0,0,0,0)",
+    });
+    c.update();
+}
+
+function addChartFromUint8ToInt16(/** @type {Chart} */c, /** @type {Uint8Array} */ dataArray) {
+    const newArray = new Array();
+    for (let i = 0; i < dataArray.length / 2; i++) {
+        let v = getLittleEndianNumberFromUint8Array(dataArray, i * 2, 2);
+        if (v > 32768) {
+            v = -((65536 - v) & 32767);
+        }
+        if (v === 32768) {v = -v}
+        newArray.push(v);
+    }
+    addChart(c, newArray);
+}
+
 /** @type {HTMLCanvasElement} */
 let canvas;
+/** @type {DLSParseResult} */
+let dlsParseResult;
 async function loadDLSFile(/** @type {Event} */ e) {
     for (let i = 0; i < e.target.files.length; i++) {
         /** @type {File} */
         const file = e.target.files[i];
         const parser = new DLSParser();
         const parseResult = await parser.parseFile(file);
-        const {wpls, instrumentIDMap} = parseResult;
+        dlsParseResult = parseResult;
+        const {wpls, instrumentIDNameBankMap: instrumentIDMap} = parseResult;
 
         console.log(instrumentIDMap);
 
@@ -111,13 +132,11 @@ async function loadDLSFile(/** @type {Event} */ e) {
                     const button = document.createElement('button');
                     button.innerText = bankID;
                     button.addEventListener('click', () => {
-                        console.log(inam, bankID, data.regionMap[69], lart?.art1List);
+                        console.log(inam, bankID, data.regionMap.get(69), lart?.art1List);
                         const ccdiv = document.createElement('div');
                         ccdiv.innerText = '● ' + bankID;
                         ccdiv.appendChild(document.createElement('br'));
-                        Object.keys(data.regionMap).forEach((midiID) => {
-                            /** @type {DLS.RgnChunk} */
-                            const regionData = data.regionMap[midiID]; // as Chunk.RgnChunk;
+                        data.regionMap.forEach((regionData, midiID) => {
                             const wsmp = regionData.wsmp;
                             const wlnk = regionData.wlnk;
                             // const lart = regionData.lart;
@@ -195,7 +214,7 @@ async function loadDLSFile(/** @type {Event} */ e) {
                                     let x = i * freqRate;
                                     if (art1Info) {
                                         let ddx = 0;
-                                        if (art1Info.EG2AttackTime > 0 || art1Info.EG2DecayTime > 0 || art1Info.EG2ReleaseTime > 0) {
+                                        if (art1Info.EG2AttackTime > 0 || art1Info.EG2DecayTime > 0 || art1Info.EG2ReleaseTime > 0 || art1Info.EG2ToPitch > 0) {
                                             if (sec < art1Info.EG2AttackTime) {
                                                 // Attack Zone
                                                 if (sec === 0) {
@@ -373,6 +392,14 @@ async function loadMIDIFile(/** @type {Event} */ e) {
         const parser = new MIDIParser();
         const parseResult = await parser.parseFile(file);
         console.log(parseResult);
+        const newData = Synthesizer.synthesizeMIDI(parseResult, dlsParseResult);
+        const blob = new Blob([newData]);
+        const url = window.URL.createObjectURL(blob);
+        const newAudio = document.createElement('audio');
+        newAudio.src = url;
+        newAudio.controls = true;
+        document.body.appendChild(newAudio);
+        addChartFromUint8ToInt16(window.c, newData.slice(130000, 350000));
     }
 }
 
