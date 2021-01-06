@@ -71,15 +71,9 @@ export class MIDIParser {
             e.value1 = this._data.getUint8(offset + 2);
             e.value2 = 0;
             e.length = 3;
-            if (subCommand === 0) {
-            } else if (0x01 <= subCommand && subCommand <= 0x1F) {
-            } else if (subCommand == 0x20) {
-            } else if (0x21 <= subCommand && subCommand <= 0x3F) {
-            } else if (0x40 <= subCommand && subCommand <= 0x5F) {
-            } else if (0x60 <= subCommand && subCommand <= 0x6F) {
-            } else if (0x70 <= subCommand && subCommand <= 0x7F) {
+            if (0x70 <= subCommand && subCommand <= 0x7F) {
                 console.warn('unknown subCommand', offset.toString(16), subCommand);
-            } else {
+            } else if (subCommand >= 0x80) {
                 console.error('Unknown subCommand', offset.toString(16), subCommand);
             }
         } else if (0xC0 <= command && command <= 0xCF) {
@@ -87,11 +81,17 @@ export class MIDIParser {
             e.length = 2;
             e.isProgramChangeEvent = true;
             e.programID = this._data.getUint8(offset + 1);
+            console.warn('Unknown', offset.toString(16));
         } else if (0xD0 <= command && command <= 0xDF) {
             // 
             e.length = 2;
         } else if (0xE0 <= command && command <= 0xEF) {
+            // PITCH BEND 
             e.length = 3;
+            e.isPitchBendChangeEvent = true;
+            const lsb = this._data.getUint8(offset + 1);
+            const msb = this._data.getUint8(offset + 2);
+            e.value1 = ((lsb & 0x7F) + ((msb & 0x7F) << 7)) - 0x2000;
         } else {
             console.warn('Unknown', offset.toString(16));
         }

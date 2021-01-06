@@ -124,7 +124,7 @@ export namespace DLS {
         cbSize          : number;
         usUnityNote     : number;
         sFineTune       : number;
-        lAttention      : number;
+        lAttenuation    : number;
         fulOptions      : number;
         cSampleLoops    : number;
         waveSampleLoop? : {
@@ -343,6 +343,8 @@ export namespace MIDI {
 
         isProgramChangeEvent : boolean = false;
         programID : number = 0;
+
+        isPitchBendChangeEvent : boolean = false;
 
         value: Uint8Array;
     }

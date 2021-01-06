@@ -204,64 +204,78 @@ async function loadDLSFile(/** @type {Event} */ e) {
                                 const freqRate = altFreq / baseFreq;
                                 let newWaveDataSegment = new Uint16Array(waveDataSegment.length);
                                 const volumes = new Array();
-                                const lfos = new Array();
-                                let dx = 0; // EG2のdxを累積させる用
+                                let lastX = 0;
+                                let sampleOffsetSpeedGain = 0; // EG2のdxを累積させる用
                                 for (i = 0; i < waveDataSegment.length; i++) {
                                     const sec = i / baseBitRate;
                                     const noteSec = 2.0; // 仮値
 
                                     // EG2(Envelope Generator for Pitch)情報をxに雑に適用
-                                    let x = i * freqRate;
+                                    let nextSampleOffsetSpeedGain = sampleOffsetSpeedGain;
                                     if (art1Info) {
-                                        let ddx = 0;
-                                        if (art1Info.EG2AttackTime > 0 || art1Info.EG2DecayTime > 0 || art1Info.EG2ReleaseTime > 0 || art1Info.EG2ToPitch > 0) {
-                                            if (sec < art1Info.EG2AttackTime) {
-                                                // Attack Zone
-                                                if (sec === 0) {
-                                                    ddx = 0
-                                                } else {
-                                                    ddx = art1Info.EG2ToPitch * sec / art1Info.EG2AttackTime;
-                                                }
-                                            } else if (sec < noteSec) {
-                                                // Decay or Sustain Zone
-                                                if (sec === 0 || art1Info.EG2DecayTime === 0) {
-                                                    ddx = 0;
-                                                } else {
-                                                    if (sec === art1Info.EG2AttackTime) {
-                                                        ddx = art1Info.EG2ToPitch;
+                                        let sampleOffsetSpeedCents = 0;
+                                        if (art1Info.EG2ToPitch) {
+                                            if (art1Info.EG2AttackTime > 0 || art1Info.EG2DecayTime > 0 || art1Info.EG2ReleaseTime > 0) {
+                                                if (sec < art1Info.EG2AttackTime) {
+                                                    // Attack Zone
+                                                    if (sec === 0) {
+                                                        sampleOffsetSpeedCents = 0
                                                     } else {
-                                                        ddx = art1Info.EG2ToPitch * (sec - art1Info.EG2AttackTime) / (art1Info.EG2DecayTime);
+                                                        sampleOffsetSpeedCents = art1Info.EG2ToPitch * sec / art1Info.EG2AttackTime;
                                                     }
-                                                }
-                                                ddx = Math.max(ddx, art1Info.EG2ToPitch * art1Info.EG2SustainLevel / 100.0);
-                                            } else {
-                                                // Sustain or Release Zone
-                                                let dddx = art1Info.EG2ToPitch;
-                                                if (sec === 0 || art1Info.EG2DecayTime === 0) {
-                                                    dddx = 0;
-                                                } else {
-                                                    if (sec !== art1Info.EG2AttackTime) {
-                                                        dddx = art1Info.EG2ToPitch * (sec - art1Info.EG2AttackTime) / (art1Info.EG2DecayTime);
-                                                    }
-                                                }
-                                                dddx = Math.max(dddx, art1Info.EG2ToPitch * art1Info.EG2SustainLevel / 100.0);
-                                                if (art1Info.EG2ReleaseTime === 0) {
-                                                    ddx = 0;
-                                                } else {
-                                                    if (sec === noteSec) {
-                                                        ddx = dddx;
+                                                } else if (sec < noteSec) {
+                                                    // Decay or Sustain Zone
+                                                    if (sec === 0 || art1Info.EG2DecayTime === 0) {
+                                                        sampleOffsetSpeedCents = 0;
                                                     } else {
-                                                        ddx = art1Info.EG2ToPitch * -Math.log10((sec - noteSec) / (art1Info.EG2ReleaseTime));
+                                                        if (sec === art1Info.EG2AttackTime) {
+                                                            sampleOffsetSpeedCents = art1Info.EG2ToPitch;
+                                                        } else {
+                                                            sampleOffsetSpeedCents = art1Info.EG2ToPitch * (sec - art1Info.EG2AttackTime) / (art1Info.EG2DecayTime);
+                                                        }
                                                     }
+                                                    sampleOffsetSpeedCents = Math.max(sampleOffsetSpeedCents, art1Info.EG2ToPitch * art1Info.EG2SustainLevel / 100.0);
+                                                } else {
+                                                    // Sustain or Release Zone
+                                                    let dddx = art1Info.EG2ToPitch;
+                                                    if (sec === 0 || art1Info.EG2DecayTime === 0) {
+                                                        dddx = 0;
+                                                    } else {
+                                                        if (sec !== art1Info.EG2AttackTime) {
+                                                            dddx = art1Info.EG2ToPitch * (sec - art1Info.EG2AttackTime) / (art1Info.EG2DecayTime);
+                                                        }
+                                                    }
+                                                    dddx = Math.max(dddx, art1Info.EG2ToPitch * art1Info.EG2SustainLevel / 100.0);
+                                                    if (art1Info.EG2ReleaseTime === 0) {
+                                                        sampleOffsetSpeedCents = 0;
+                                                    } else {
+                                                        if (sec === noteSec) {
+                                                            sampleOffsetSpeedCents = dddx;
+                                                        } else {
+                                                            sampleOffsetSpeedCents = art1Info.EG2ToPitch * (sec - noteSec) / (art1Info.EG2ReleaseTime);
+                                                        }
+                                                    }
+                                                    sampleOffsetSpeedCents = Math.min(sampleOffsetSpeedCents, dddx);
                                                 }
-                                                ddx = Math.min(ddx, dddx);
+                                                // ddx : cent単位
+                                                sampleOffsetSpeedCents = Math.max(0, Math.min(art1Info.EG2ToPitch, sampleOffsetSpeedCents));
                                             }
-                                            ddx = Math.max(0, Math.min(art1Info.EG2ToPitch, ddx));
                                         }
-                                        dx -= ddx / baseBitRate;
-                                        //console.log(x, dx, ddx, sec, baseBitRate, art1Info.EG2ToPitch);
+                                        // LFO情報もpositionDXに適用 (cent単位)
+                                        let lfo = 0;
+                                        if (art1Info.LFOToPitch) {
+                                            // 遅延が存在する場合は遅延時間以降でサインカーブを生成
+                                            if (sec >= art1Info.LFODelay) {
+                                                lfo = Math.sin((sec - art1Info.LFODelay) * Math.PI * 2 / art1Info.LFOFrequency) * art1Info.LFOToPitch;
+                                            }
+                                        }
+                                        sampleOffsetSpeedCents += lfo;
+                                        // dx : 増加率 (0は等倍, 1でHz2倍)
+                                        nextSampleOffsetSpeedGain = (2 ** (sampleOffsetSpeedCents / 1200)) - 1.0;
                                     }
-                                    x += dx;
+                                    let x = lastX + (freqRate + nextSampleOffsetSpeedGain);
+                                    sampleOffsetSpeedGain = nextSampleOffsetSpeedGain;
+                                    lastX = x;
                                     let y;
                                     // TODO : 一旦「線形補間」
                                     if (Number.isInteger(x)) {
@@ -325,20 +339,15 @@ async function loadDLSFile(/** @type {Event} */ e) {
                                     // LFO情報を反映
                                     let lfo = 0;
                                     if (art1Info) {
-                                        if (art1Info.LFOPitch > 0) {
+                                        if (art1Info.LFOToVolume > 0) {
                                             // 遅延が存在する場合は遅延時間以降でサインカーブを生成
-                                            // ピッチに依存してボリュームを雑に下げる(遅延以外の部分も込み)
                                             if (sec >= art1Info.LFODelay) {
-                                                lfo = Math.sin((sec - art1Info.LFODelay) * Math.PI * 2 / art1Info.LFOFrequency) * (32768 * art1Info.LFOPitch);
+                                                lfo = Math.sin((sec - art1Info.LFODelay) * Math.PI * 2 / art1Info.LFOFrequency) * art1Info.LFOToVolume;
                                             }
-                                            volume *= 0.5 / art1Info.LFOPitch;
                                         } 
                                     }
-                                    lfos.push(lfo);
                                     newWaveDataSegment.set([Math.round((y + lfo) * volume)], i);
                                 }
-                                // console.log(volumes);
-                                // console.log(lfos);
                                 waveDataSegment = newWaveDataSegment;
                                 
                                 //const dataSize = getLittleEndianNumberFromUint8Array(segment, 86, 4);

@@ -21,8 +21,24 @@ export class ParseResult {
     }
 };
 
-export function getFrequencyFromNoteID(id : number) {
-    return 440 * (2.0 ** ((id - 69) / 12.0)) + 0.5;
+export function getFrequencyFromNoteID(noteID : number) {
+    const table = [
+        440,
+        466.16376152,
+        493.88330126,
+        523.2511306,
+        554.36526195,
+        587.32953583,
+        622.25396744,
+        659.25511383,
+        698.45646287,
+        739.98884542,
+        783.99087196,
+        830.60939516,
+    ];
+    const offset = (noteID + 3) % 12;
+    const size = 2 ** Math.floor((noteID -69) / 12);
+    return table[offset] * size;
 }
 
 export class DLSParser{
@@ -105,7 +121,7 @@ export class DLSParser{
                                     cbSize      : data.getUint32(rgnSubOffset + 8 , true),
                                     usUnityNote : data.getUint16(rgnSubOffset + 12, true),
                                     sFineTune   : data.getInt16 (rgnSubOffset + 14, true),
-                                    lAttention  : data.getInt32 (rgnSubOffset + 16, true),
+                                    lAttenuation: data.getInt32 (rgnSubOffset + 16, true),
                                     fulOptions  : data.getUint32(rgnSubOffset + 20, true),
                                     cSampleLoops: data.getUint32(rgnSubOffset + 24, true),
                                 });
