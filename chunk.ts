@@ -193,6 +193,11 @@ export namespace DLS {
         CONN_SRC_KEYNUMBER     : 0x0003,
         CONN_SRC_EG1           : 0x0004,
         CONN_SRC_EG2           : 0x0005,
+
+        CONN_SRC_CC1           : 0x0081,  // Modulation Wheel(pitch)
+        CONN_SRC_CC7           : 0x0087,  // Volume Attenuation
+        CONN_SRC_CC10          : 0x008A,  // PAN
+        CONN_SRC_CC11          : 0x008B,  // Expression
     };
 
     export const ART1DESTINATION = {
@@ -269,11 +274,12 @@ export namespace DLS {
     }
 
     export class WaveChunk extends Chunk {
-        rawData        : ArrayBuffer;
-        bytesPerSecond : number;
-        segmentData    : Uint8Array;
-        pcmData        : Int16Array;
-        waveData       : Blob;
+        rawData         : ArrayBuffer;
+        bytesPerSecond  : number;
+        segmentData     : Uint8Array;
+        pcmData         : Int16Array;
+        waveData        : Blob;
+        wsmpChunk?      : WsmpChunk;
 
         constructor(offset : number, size: number, data?: Partial<WaveChunk>) {
             super('wave', offset, size);

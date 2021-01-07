@@ -1,4 +1,5 @@
-import { DLSParser, ParseResult as DLSParseResult } from "./dls";
+import { DLS } from "./chunk";
+import { DLSParser, getFrequencyFromNoteID, ParseResult as DLSParseResult } from "./dls";
 import { MIDIParser } from "./midi";
 import { Synthesizer } from "./synthesizer";
 const Chart = require('chart.js');
@@ -124,18 +125,17 @@ async function loadDLSFile(/** @type {Event} */ e) {
                     const {insChunk} = data;
                     const lart = insChunk.lart;
                     const art1Info = Synthesizer.getArt1InfoFromLarts(lart)
-                    console.log(id, bankID, lart, art1Info);
+                    console.log(id, bankID, insChunk, lart, art1Info);
                     if (art1Info && (art1Info.EG2AttackTime > 0 || art1Info.EG2DecayTime > 0 || art1Info.EG2ReleaseTime > 0)) {
                         console.log(id, inam, bankID, art1Info.EG2AttackTime, art1Info.EG2DecayTime, art1Info.EG2ReservedTime, art1Info.EG2ReleaseTime, art1Info.EG2SustainLevel, art1Info.EG2ToPitch, art1Info);
                     }
                     const button = document.createElement('button');
                     button.innerText = bankID;
                     button.addEventListener('click', () => {
-                        console.log(inam, bankID, data.regionMap.get(69).get(100), lart?.art1List);
                         const ccdiv = document.createElement('div');
                         ccdiv.innerText = '● ' + bankID;
                         ccdiv.appendChild(document.createElement('br'));
-                        data.regionMap.forEach((velocityRegionDataMap, midiID) => {
+                        data.regionMap.forEach((velocityRegionDataMap, noteID) => {
                             const regionData = velocityRegionDataMap.get(100); // 数が多すぎるので
                             const wsmp = regionData.wsmp;
                             const wlnk = regionData.wlnk;
@@ -143,19 +143,19 @@ async function loadDLSFile(/** @type {Event} */ e) {
                             // console.log(lart);
                             if (!wlnk) return;
                             const wave = {
-                                id: wlnk.ulTableIndex, 
-                                wData: wpls.waveList[wlnk.ulTableIndex]};
-                            if (!wave.wData) return;
+                                id: wlnk.ulTableIndex,
+                                wData: data.waves.get(wlnk.ulTableIndex),
+                            }
                             const span = document.createElement('span');
                             span.style.display = 'inline-block';
-                            span.innerText = '・ ' + midiID;
+                            span.innerText = '・ ' + noteID;
 
                             const audio = document.createElement('audio');
                             if (wsmp) {
                                 // 元のデータ
                                 let segment = new Uint8Array(wave.wData.segmentData);
                                 const baseID = wsmp.usUnityNote;
-                                const baseFreq = parser.frequencyTable[baseID];
+                                const baseFreq = getFrequencyFromNoteID(baseID);
                                 const baseBitRate = getLittleEndianNumberFromUint8Array(segment, 24, 4);
 
                                 // waveのdata部分を抽出して変更しやすいようにInt16Array生成
@@ -200,12 +200,13 @@ async function loadDLSFile(/** @type {Event} */ e) {
                                 }
 
                                 // Hz改変
-                                const altFreq = parser.frequencyTable[Number(midiID)];
+                                const altFreq = getFrequencyFromNoteID(noteID);
                                 const freqRate = altFreq / baseFreq;
                                 let newWaveDataSegment = new Uint16Array(waveDataSegment.length);
-                                const volumes = new Array();
                                 let lastX = 0;
                                 let sampleOffsetSpeedGain = 0; // EG2のdxを累積させる用
+                                let minY = -1;
+                                let maxY = 1;
                                 for (i = 0; i < waveDataSegment.length; i++) {
                                     const sec = i / baseBitRate;
                                     const noteSec = 2.0; // 仮値
@@ -214,7 +215,7 @@ async function loadDLSFile(/** @type {Event} */ e) {
                                     let nextSampleOffsetSpeedGain = sampleOffsetSpeedGain;
                                     if (art1Info) {
                                         let sampleOffsetSpeedCents = 0;
-                                        if (art1Info.EG2ToPitch) {
+                                        if (art1Info.EG2ToPitch > 0) {
                                             if (art1Info.EG2AttackTime > 0 || art1Info.EG2DecayTime > 0 || art1Info.EG2ReleaseTime > 0) {
                                                 if (sec < art1Info.EG2AttackTime) {
                                                     // Attack Zone
@@ -263,17 +264,29 @@ async function loadDLSFile(/** @type {Event} */ e) {
                                         }
                                         // LFO情報もpositionDXに適用 (cent単位)
                                         let lfo = 0;
-                                        if (art1Info.LFOToPitch) {
+                                        if (art1Info.LFOToPitch > 0) {
                                             // 遅延が存在する場合は遅延時間以降でサインカーブを生成
                                             if (sec >= art1Info.LFODelay) {
-                                                lfo = Math.sin((sec - art1Info.LFODelay) * Math.PI * 2 / art1Info.LFOFrequency) * art1Info.LFOToPitch;
+                                                lfo = -Math.sin((sec - art1Info.LFODelay) * Math.PI * 2 * art1Info.LFOFrequency) * art1Info.LFOToPitch;
                                             }
                                         }
                                         sampleOffsetSpeedCents += lfo;
-                                        // dx : 増加率 (0は等倍, 1でHz2倍)
+                                        // Key Number To Pitch もpositionDXに反映 (cent単位)
+                                        let keyNumberToPitch = 0;
+                                        if (art1Info.KeyNumberToPitch > 0) {
+                                            keyNumberToPitch = art1Info.KeyNumberToPitch * (noteID / 128);
+                                        }
+                                        sampleOffsetSpeedCents += keyNumberToPitch;
+                                        if (wsmp) {
+                                            // sFineTune を加味 (NOTE : DLSの仕様では65536で割るべきっぽいけどgm.dlsのfineTuneの内容的に行わない)
+                                            sampleOffsetSpeedCents += wsmp.sFineTune;
+                                        }
+                                        // dx : 増加率 (0は等倍, 1につき1オクターブ)
                                         nextSampleOffsetSpeedGain = (2 ** (sampleOffsetSpeedCents / 1200)) - 1.0;
+                                        if (sec <= 3 && i % 10000 === 0)
+                                            console.log(noteID, i, x, sec, freqRate, lastX, nextSampleOffsetSpeedGain, sampleOffsetSpeedCents, art1Info.LFOToPitch);
                                     }
-                                    let x = lastX + (freqRate + nextSampleOffsetSpeedGain);
+                                    let x = lastX + freqRate * (1.0 + nextSampleOffsetSpeedGain);
                                     sampleOffsetSpeedGain = nextSampleOffsetSpeedGain;
                                     lastX = x;
                                     let y;
@@ -288,67 +301,97 @@ async function loadDLSFile(/** @type {Event} */ e) {
                                         y = (x2 - x) * y1 + (x - x1) * y2;
                                     }
                                     // EG1(Envelope Generator for Volume)情報を反映
-                                    let volume = 1.0;
+                                    let dAttenuation = 96;
+                                    let eg1Attenuation = 96;
                                     if (art1Info) {
+                                        let attackTime = art1Info.EG1AttackTime;
+                                        if (art1Info.EG1VelocityToAttack > 0) {
+                                            attackTime -= Synthesizer.getSecondsFromArt1Scale(art1Info.EG1VelocityToAttack * (100 / 128));
+                                        }
                                         let decayTime = art1Info.EG1DecayTime;
                                         if (art1Info.EG1KeyToDecay > 0) {
-                                            decayTime += art1Info.EG1KeyToDecay * (Number(midiID) / 128);
+                                            decayTime += Synthesizer.getSecondsFromArt1Scale(art1Info.EG1KeyToDecay * (noteID / 128));
                                         }
-                                        if (sec < art1Info.EG1AttackTime) {
+                                        if (sec < attackTime) {
                                             // Attack Zone
-                                            volume = sec / art1Info.EG1AttackTime;
+                                            eg1Attenuation = Math.min(96, sec === 0 ? 96 : 20 * Math.log10(attackTime / sec));
                                         } else if (sec < noteSec) {
                                             // Decay or Sustain Zone
                                             if (sec === 0 || decayTime === 0) {
-                                                volume = 0;
+                                                eg1Attenuation = 96;
                                             } else {
-                                                if (sec === art1Info.EG1AttackTime) {
-                                                    volume = 1.0;
+                                                if (sec === attackTime) {
+                                                    eg1Attenuation = 0;
                                                 } else {
-                                                    volume = -Math.log10((sec - art1Info.EG1AttackTime) / decayTime + 0.1);
+                                                    eg1Attenuation = 96 * (sec - attackTime) / decayTime;
                                                 }
                                             }
-                                            volume = Math.max(volume, art1Info.EG1SustainLevel / 100.0);
+                                            eg1Attenuation = Math.min(eg1Attenuation, 96 * (1 - art1Info.EG1SustainLevel / 100.0));
                                         } else {
                                             // Sustain or Release Zone
-                                            let dVolume = 1.0;
                                             if (sec === 0 || decayTime === 0) {
-                                                dVolume = 0;
+                                                dAttenuation = 96;
                                             } else {
-                                                if (sec === art1Info.EG1AttackTime) {
-                                                    dVolume = 1.0;
+                                                if (sec === attackTime) {
+                                                    dAttenuation = 0;
                                                 } else {
-                                                    dVolume = -Math.log10((sec - art1Info.EG1AttackTime) / decayTime + 0.1);
+                                                    dAttenuation = 96 * (sec - attackTime) / decayTime;
                                                 }
                                             }
-                                            dVolume = Math.max(dVolume, art1Info.EG1SustainLevel / 100.0);
+                                            dAttenuation = Math.min(dAttenuation, 96 * (1 - art1Info.EG1SustainLevel / 100.0));
                                             if (art1Info.EG1ReleaseTime === 0) {
-                                                volume = 0;
+                                                eg1Attenuation = 96;
                                             } else {
                                                 if (sec === noteSec) {
-                                                    volume = dVolume;
+                                                    eg1Attenuation = dAttenuation;
                                                 } else {
-                                                    volume = -Math.log10((sec - noteSec) / (art1Info.EG1ReleaseTime) + 0.1);
+                                                    eg1Attenuation = 96 * (sec - noteSec) / art1Info.EG1ReleaseTime;
                                                 }
                                             }
-                                            volume = Math.min(volume, dVolume);
+                                            eg1Attenuation = Math.max(eg1Attenuation, dAttenuation);
                                         }
-                                        volume = Math.min(1.0, Math.max(0, volume));
+                                        eg1Attenuation = Math.min(96, Math.max(0, eg1Attenuation));
+                                        //if (Math.abs(sec-noteSec) <= 1.0) console.log(offset, channelID, noteID, sec, sec-noteSec, sec <= attackTime, sec-noteSec <= 0, eg1Attenuation, dAttenuation, attackTime, art1Info.EG1AttackTime, art1Info.EG1VelocityToAttack);
                                     }
-                                    volumes.push(volume);
                                     // LFO情報を反映
                                     let lfo = 0;
+                                    let lfoAttenuation = 0;
                                     if (art1Info) {
                                         if (art1Info.LFOToVolume > 0) {
                                             // 遅延が存在する場合は遅延時間以降でサインカーブを生成
                                             if (sec >= art1Info.LFODelay) {
                                                 lfo = Math.sin((sec - art1Info.LFODelay) * Math.PI * 2 / art1Info.LFOFrequency) * art1Info.LFOToVolume;
+                                                lfoAttenuation = lfo;
                                             }
                                         } 
                                     }
-                                    newWaveDataSegment.set([Math.round((y + lfo) * volume)], i);
+                                    // WSMPのAttenuationを加味
+                                    let wsmpAttenuation = 0;
+                                    if (wsmp) {
+                                        if (wsmpAttenuation === 0x80000000) {
+                                            y = 0;
+                                        }
+                                        wsmpAttenuation = wsmp.lAttenuation / 65536 / 40;
+                                    }
+                                    y = (y * (0.1 ** ((Math.max(0, eg1Attenuation + wsmpAttenuation + lfoAttenuation)) / 20))) * (90.0 / 100.0);
+                                    // if (sec <= 3.0 && i % 1000 === 0) {
+                                    //     console.log(noteID, i, sec, x, y, eg1Attenuation, wsmpAttenuation, lfoAttenuation, 0.1 ** ((Math.max(0, eg1Attenuation + wsmpAttenuation + lfoAttenuation)) / 20));
+                                    // }
+
+                                    newWaveDataSegment.set([y], i);
+                                    minY = Math.min(minY, y);
+                                    maxY = Math.max(y, maxY);
                                 }
                                 waveDataSegment = newWaveDataSegment;
+
+                                const compressMax = Math.abs(maxY) / 32767;
+                                const compressMin = Math.abs(minY) / 32767;
+                                const compress = Math.max(compressMax, compressMin);
+                                if (compress>= 1) {
+                                    for (let i = 0; i < waveDataSegment.length; i++) {
+                                        waveDataSegment.set([Math.round(waveDataSegment[i] / compress * 0.9)], i);
+                                    }
+                                }
                                 
                                 //const dataSize = getLittleEndianNumberFromUint8Array(segment, 86, 4);
                                 // Int16ArrayをUint8Arrayに戻して新しいSegmentを作る
@@ -401,14 +444,25 @@ async function loadMIDIFile(/** @type {Event} */ e) {
         const parser = new MIDIParser();
         const parseResult = await parser.parseFile(file);
         console.log(parseResult);
-        const newData = Synthesizer.synthesizeMIDI(parseResult, dlsParseResult);
-        const blob = new Blob([newData]);
+        const synthesizeResult = Synthesizer.synthesizeMIDI(parseResult, dlsParseResult);
+        const blob = new Blob([synthesizeResult.waveSegment]);
         const url = window.URL.createObjectURL(blob);
         const newAudio = document.createElement('audio');
         newAudio.src = url;
         newAudio.controls = true;
-        document.body.appendChild(newAudio);
-        addChartFromUint8ToInt16(window.c, newData.slice(130000, 350000));
+        document.getElementById("audioarea").appendChild(newAudio);
+        synthesizeResult.channelToWaveSegment.forEach((waveSegment, channelID) => {
+            const div = document.createElement('div');
+            div.innerText = `● ${channelID} :   `;
+            const blob = new Blob([waveSegment]);
+            const url = window.URL.createObjectURL(blob);
+            const channelAudio = document.createElement('audio');
+            channelAudio.src = url;
+            channelAudio.controls = true;
+            div.appendChild(channelAudio)
+            document.getElementById("audioarea").appendChild(div);       
+        })
+        addChartFromUint8ToInt16(window.c, synthesizeResult.waveSegment.slice(130000, 350000));
     }
 }
 
@@ -421,7 +475,7 @@ function main() {
     input.accept = 'dls';
     input.addEventListener('change', loadDLSFile);
     div1.appendChild(input);
-    document.body.appendChild(div1);
+    document.getElementById('inputarea').appendChild(div1);
 
     const div2 = document.createElement('div');
     div2.innerText = 'any midi file (*.mid)    ';
@@ -430,7 +484,7 @@ function main() {
     input2.accept = 'mid';
     input2.addEventListener('change', loadMIDIFile);
     div2.appendChild(input2);
-    document.body.appendChild(div2);
+    document.getElementById('inputarea').appendChild(div2);
 
     canvas = document.createElement('canvas');
     canvas.width = 1080;

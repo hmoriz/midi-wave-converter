@@ -60,6 +60,10 @@ export namespace Synthesizer {
 
         EG2ToPitch : number = 0;
 
+        Pan : number = 0;
+        
+        KeyNumberToPitch : number = 0;
+
         PitchPerModWheel : number = 0;
     }
     
@@ -169,19 +173,44 @@ export namespace Synthesizer {
                         if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_LFO) {
                             // LFO -> Volume
                             ret.LFOToVolume = cb.lScale / 655360;
+                            return;
                         }
+                        if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_CC7) {
+                            // CC7(Volume Controller) -> Volume
+                            // あったら対応(なさそう)
+                            console.error("CC7ToVolume", cb.lScale);
+                        }
+                        if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_CC11) {
+                            // CC11(Expression Controller) -> Volume
+                            // あったら対応(なさそう)
+                            console.error("CC11ToVolume", cb.lScale);
+                        }
+                        break;
                     case DLS.ART1DESTINATION.CONN_DST_PITCH:
                         if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_LFO) {
                             // LFO -> Pitch
-                            ret.LFOToPitch = getFrequencyFromArt1CentScale(cb.lScale);
+                            ret.LFOToPitch = Math.max(-1200, Math.min(1200, cb.lScale / 655360.0));
+                            return;
+                        }
+                        if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_KEYNUMBER) {
+                            ret.KeyNumberToPitch = Math.max(-1200, Math.min(1200, cb.lScale / 655360.0));
+                            console.error("KeyNumberToPitch", cb.lScale); // DLS仕様書にはあるがgm.dlsにはなさそう
                             return;
                         }
                         if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_EG2) {
                             // EG2 Value to Pitch (max pitch delta)
-                            ret.EG2ToPitch = getFrequencyFromArt1CentScale(cb.lScale);
+                            ret.EG2ToPitch = Math.max(-1200, Math.min(1200, cb.lScale / 655360.0));
+                            console.log("EG2ToPitch", cb.lScale, cb.lScale / 65536, getFrequencyFromArt1CentScale(cb.lScale), ret.EG2ToPitch);
                             return;
                         }
                         break;
+                    case DLS.ART1DESTINATION.CONN_DST_PAN:
+                        // console.error("PAN", cb.lScale, cb.usSource, cb.lScale / 655360.0);
+                        if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_NONE) {
+                            // NOTE : 仕様書によれば0.1%単位らしいけど範囲に収めることを考えて65536 * 10で割る
+                            ret.Pan = Math.max(-50, Math.min(50, cb.lScale / 655360.0));
+                            return;
+                        }
                 }
                 console.warn('Unknown ART1 Destination', cb);
             })
@@ -197,19 +226,38 @@ export namespace Synthesizer {
         length : number;
     }
 
+    const CONTROLLER = {
+        MODULATION_WHEEL : 1,
+        VOLUME           : 7,
+        PAN              : 10,
+    };
+
+    type Controller = typeof CONTROLLER[keyof typeof CONTROLLER];
+
     class InstrumentInfo {
         instrumentID : number = 0;
-        bankID : number = 0;
-        volume : number = 100;
+        bankID      : number = 0;
+        volume      : number = 100;
+        controllers : Map<Controller, number> = new Map<number, number>();
 
         constructor(data? : Partial<InstrumentInfo>) {
             Object.assign(this, data);
         }
     }
 
-    export function synthesizeMIDI(midi : MidiParseInfo, dls : DLSParseInfo) :  Uint8Array {
+    export class SynthesizeResult {
+        waveSegment : Uint8Array;
+        channelToWaveSegment : Map<number, Uint8Array>;
+
+        constructor() {
+            this.channelToWaveSegment = new Map();
+        }
+    }
+
+    export function synthesizeMIDI(midi : MidiParseInfo, dls : DLSParseInfo) :  SynthesizeResult {
         const riffData = new Array<number>(); // uint8
-        const waveData = new Array<number>(); // int16
+        const waveDataR = new Array<number>(); // int16
+        const waveDataL = new Array<number>(); // int16
         riffData[0] = 'R'.charCodeAt(0);
         riffData[1] = 'I'.charCodeAt(0);
         riffData[2] = 'F'.charCodeAt(0);
@@ -228,19 +276,19 @@ export namespace Synthesizer {
         riffData[19] = 0;
         riffData[20] = 1;    // linear PCM
         riffData[21] = 0;
-        riffData[22] = 1;    // Monoral
+        riffData[22] = 2;    // Stereo
         riffData[23] = 0;
-        riffData[24] = 0x44; // 44100
+        riffData[24] = 0x44; // 44100 Hz
         riffData[25] = 0xAC;
         riffData[26] = 0x00;
         riffData[27] = 0x00;
-        riffData[28] = 0x88; // 88200
-        riffData[29] = 0x58;
-        riffData[30] = 0x01;
+        riffData[28] = 0x10; // 44100 * 4 = 176400 bytes / sec
+        riffData[29] = 0xB1;
+        riffData[30] = 0x02;
         riffData[31] = 0x00;
-        riffData[32] = 2;    // 2byte
+        riffData[32] = 4;    // 4byte / frame
         riffData[33] = 0;
-        riffData[34] = 16;   // 16bit
+        riffData[34] = 16;   // 16bit / frame
         riffData[35] = 0;
         riffData[36] = 'd'.charCodeAt(0);
         riffData[37] = 'a'.charCodeAt(0);
@@ -303,14 +351,16 @@ export namespace Synthesizer {
                             }
                         }
                     } else if (mtrkEvent.event.isControlEvent) {
+                        const lastTick = channelToInstrumentLastTick.get(mtrkEvent.event.channel);
+                        let instrumentInfo : InstrumentInfo
+                        if (lastTick) {
+                            let lastInstrument = tickInstrumentMap.get(mtrkEvent.event.channel).get(lastTick)
+                            instrumentInfo = new InstrumentInfo(lastInstrument);
+                        } else {
+                            instrumentInfo = new InstrumentInfo();
+                        }
                         if (mtrkEvent.event.controlCommand === 0x00 || mtrkEvent.event.controlCommand === 0x20) {
                             // BANK Select (0x00 -> LSB, 0x20 -> MSB)
-                            const lastTick = channelToInstrumentLastTick.get(mtrkEvent.event.channel);
-                            let instrumentInfo = new InstrumentInfo();
-                            if (lastTick) {
-                                let lastInstrument = tickInstrumentMap.get(mtrkEvent.event.channel).get(lastTick);
-                                instrumentInfo = new InstrumentInfo(lastInstrument);
-                            }
                             if (mtrkEvent.event.controlCommand === 0x00) {
                                 // LSB
                                 instrumentInfo.bankID = instrumentInfo.bankID & 0xFF00 + mtrkEvent.event.value1;
@@ -318,22 +368,17 @@ export namespace Synthesizer {
                                 // MSB
                                 instrumentInfo.bankID = instrumentInfo.bankID & 0x00FF + (mtrkEvent.event.value1 << 8);
                             }
-                            if (!tickInstrumentMap.get(mtrkEvent.event.channel)) tickInstrumentMap.set(mtrkEvent.event.channel, new Map());
-                            tickInstrumentMap.get(mtrkEvent.event.channel).set(tick, instrumentInfo);
-                            channelToInstrumentLastTick.set(mtrkEvent.event.channel, tick);
                         } else if (mtrkEvent.event.controlCommand === 0x07) {
                             // Volume
-                            const lastTick = channelToInstrumentLastTick.get(mtrkEvent.event.channel);
-                            let instrumentInfo = new InstrumentInfo();
-                            if (lastTick) {
-                                let lastInstrument = tickInstrumentMap.get(mtrkEvent.event.channel).get(lastTick);
-                                instrumentInfo = new InstrumentInfo(lastInstrument);
-                            }
                             instrumentInfo.volume = mtrkEvent.event.value1;
-                            if (!tickInstrumentMap.get(mtrkEvent.event.channel)) tickInstrumentMap.set(mtrkEvent.event.channel, new Map());
-                            tickInstrumentMap.get(mtrkEvent.event.channel).set(tick, instrumentInfo);
-                            channelToInstrumentLastTick.set(mtrkEvent.event.channel, tick);
+                        } else if (mtrkEvent.event.controlCommand === 0x0A) {
+                            // PAN
+                            console.warn("PAN Control", mtrkEvent.event.value1);
+                            instrumentInfo.controllers.set(CONTROLLER.PAN, mtrkEvent.event.value1);
                         }
+                        if (!tickInstrumentMap.get(mtrkEvent.event.channel)) tickInstrumentMap.set(mtrkEvent.event.channel, new Map());
+                        tickInstrumentMap.get(mtrkEvent.event.channel).set(tick, instrumentInfo);
+                        channelToInstrumentLastTick.set(mtrkEvent.event.channel, tick);
                     } else if (mtrkEvent.event.isProgramChangeEvent) {
                         // Program ID
                         const lastTick = channelToInstrumentLastTick.get(mtrkEvent.event.channel);
@@ -428,6 +473,9 @@ export namespace Synthesizer {
                 offsetPitchBendMap.get(channelID).set(offset, pitchBendInfo);
             })
         })
+        
+        // channelID -> [waveDataR(Int16Array), waveDataL(Int16Array)]
+        const channelWaveDatas = new Map<number, [Array<number>, Array<number>]>();
 
         // channelID -> noteID -> [attacked offset, valocity, sample_offset_speed_gain, last_sample_offset]
         const noteIDAttackedOffsetMap = new Map<number, Map<number, [number, NoteInfo, number, number]>>();
@@ -436,18 +484,24 @@ export namespace Synthesizer {
         // channelID -> noteID -> velocity -> art1Info(for rgn)
         const regionArt1InfoMap = new Map<number, Map<number, Map<Number, Art1Info>>>();
         channelIDs.forEach(channelID => {
+            channelWaveDatas.set(channelID, [new Array(), new Array()]);
             noteIDAttackedOffsetMap.set(channelID, new Map<number, [number, NoteInfo, number, number]>());
             regionArt1InfoMap.set(channelID, new Map<number, Map<number, Art1Info>>());
         });
         // channelID -> pitchBend(number)
         const pitchBendMap = new Map<number, number>();
-        let waveDataMin = 1;
-        let waveDataMax = -1;
+        let waveDataRMin = 1;
+        let waveDataRMax = -1;
+        // channeiID -> [waveDataMin, waveDataMax]
+        const channelWaveDataMaxMin = new Map<number, [number, number]>();
         for (let offset = 0; offset < maxOffset; offset++) {
             if (offset % 10000 === 0)console.log("Synthesize Processing... ", offset, "/", Math.ceil(maxOffset));
-            waveData[offset] = 0;
+            waveDataR[offset] = 0;
+            waveDataL[offset] = 0;
             
             channelIDs.forEach((channelID) => {
+                channelWaveDatas.get(channelID)[0][offset] = 0;
+                channelWaveDatas.get(channelID)[1][offset] = 0;
                 // if (channelID !== 0) return; // 仮置
                 const instrumentEvent = offsetInstrumentMap.get(channelID)?.get(offset);
                 if (instrumentEvent) {
@@ -504,15 +558,15 @@ export namespace Synthesizer {
                         if (secFromReleased >= art1Info.EG1ReleaseTime) {
                             noteIDAttackedOffsetMap.get(channelID).delete(noteID);
                         } else {
-                            const waveInfo = instrumentData.waves.find(waveInfo => waveInfo.id === rgn.wlnk.ulTableIndex);
-                            if (!waveInfo) {
+                            const waveChunk = instrumentData.waves.get(rgn.wlnk.ulTableIndex);
+                            if (!waveChunk) {
                                 console.error("cannot load waveInfo from ", rgn);
                                 noteIDAttackedOffsetMap.get(channelID).delete(noteID);
                                 return;
                             }
-                            const bps = waveInfo.wave.bytesPerSecond;
+                            const bps = waveChunk.bytesPerSecond;
                             const sampleOffsetDefaultSpeed = bps / 44100;
-                            const wsmp = rgn.wsmp;
+                            const wsmp = rgn.wsmp || waveChunk.wsmpChunk;
                             let baseFrequency = 0;
                             let waveLoopStart = 0;
                             let waveLoopLength = 0;
@@ -575,7 +629,7 @@ export namespace Synthesizer {
                                             }
                                             sampleOffsetSpeedCents = Math.min(sampleOffsetSpeedCents, dddx);
                                         }
-                                        // ddx : cent単位
+                                        // sampleOffsetSpeedCents : cent単位
                                         sampleOffsetSpeedCents = Math.max(0, Math.min(art1Info.EG2ToPitch, sampleOffsetSpeedCents));
                                     }
                                 }
@@ -584,7 +638,7 @@ export namespace Synthesizer {
                                 if (art1Info.LFOToPitch) {
                                     // 遅延が存在する場合は遅延時間以降でサインカーブを生成
                                     if (sec >= art1Info.LFODelay) {
-                                        lfo = Math.sin((sec - art1Info.LFODelay) * Math.PI * 2 / art1Info.LFOFrequency) * art1Info.LFOToPitch;
+                                        lfo = Math.sin((sec - art1Info.LFODelay) * Math.PI * 2 * art1Info.LFOFrequency) * art1Info.LFOToPitch;
                                     }
                                 }
                                 sampleOffsetSpeedCents += lfo;
@@ -592,7 +646,7 @@ export namespace Synthesizer {
                                     // sFineTune を加味 (NOTE : DLSの仕様では65536で割るべきっぽいけどgm.dlsのfineTuneの内容的に行わない)
                                     sampleOffsetSpeedCents += wsmp.sFineTune;
                                 }
-                                // sampleOffsetSpeedGain : 増加率 (0は等倍, 1でHz2倍)
+                                // sampleOffsetSpeedGain : 増加率 (0は等倍, 1につき1オクターブ)
                                 nextSampleOffsetSpeedGain = (2 ** (sampleOffsetSpeedCents / 1200)) - 1.0;
                                 // ピッチベンド適用 (EG2と同様, ピッチベンドは -8191 ~ 8192のため -0.5(1オクターブ下) ～ 1.0(1オクターブ上))
                                 let pitchBendSpeedGain = 0;
@@ -602,11 +656,11 @@ export namespace Synthesizer {
                                 nextSampleOffsetSpeedGain = (nextSampleOffsetSpeedGain + pitchBendSpeedGain);
                                 // if (offset % 1000000 === 10 || offset % 1000000 === 11) console.log(offset, channelID, position, pitchBendMap.get(channelID), lastSampleOffset, sampleOffsetSpeedGain, nextSampleOffsetSpeedGain, pitchBendSpeedGain, sampleOffsetSpeedCents, sampleOffsetDefaultSpeed, freqRate, wsmp?.sFineTune);
                             }
-                            let sampleOffset = Math.max(0, lastSampleOffset + sampleOffsetDefaultSpeed * (freqRate + nextSampleOffsetSpeedGain));
+                            let sampleOffset = Math.max(0, lastSampleOffset + sampleOffsetDefaultSpeed * freqRate * (1 + nextSampleOffsetSpeedGain));
                             noteIDAttackedOffsetMap.get(channelID).set(noteID, [attackedOffset, noteInfo, nextSampleOffsetSpeedGain, sampleOffset]);
-                            if (waveLooping && sampleOffset >= waveInfo.wave.pcmData.length -1) {
-                                sampleOffset = ((sampleOffset - waveInfo.wave.pcmData.length) % waveLoopLength) + waveLoopStart;
-                            } else if (!waveLooping && sampleOffset >= waveInfo.wave.pcmData.length-1) {
+                            if (waveLooping && sampleOffset >= waveChunk.pcmData.length -1) {
+                                sampleOffset = ((sampleOffset - waveChunk.pcmData.length) % waveLoopLength) + waveLoopStart;
+                            } else if (!waveLooping && sampleOffset >= waveChunk.pcmData.length-1) {
                                 if (offset <= noteInfo.endOffset) {
                                     // NOTE ONのうちにワンショット系の時間が過ぎているので一応警告
                                     console.warn("sampleOffset is out of BOUND", sampleOffset );
@@ -617,19 +671,18 @@ export namespace Synthesizer {
                             // TODO : 一旦「線形補間」
                             let sampleWaveData = 0;
                             if (Number.isInteger(sampleOffset)) {
-                                sampleWaveData = waveInfo.wave.pcmData[sampleOffset];
+                                sampleWaveData = waveChunk.pcmData[sampleOffset];
                             } else {
                                 const x1 = Math.trunc(sampleOffset);
                                 const x2 = Math.ceil(sampleOffset);
-                                const y1 = waveInfo.wave.pcmData[x1];
-                                const y2 = waveInfo.wave.pcmData[x2];
+                                const y1 = waveChunk.pcmData[x1];
+                                const y2 = waveChunk.pcmData[x2];
                                 sampleWaveData = (x2 - sampleOffset) * y1 + (sampleOffset - x1) * y2;
                             }
                             sampleWaveData = Math.round(sampleWaveData * (noteInfo.velocity / 100));
                             // EG1(Envelope Generator for Volume)情報を反映
                             let eg1Velocity = 1.0;
-                            let eg1Attenuation = 0;
-                            let dAttenuation = 96;
+                            let eg1Attenuation = 96;
                             if (art1Info) {
                                 let attackTime = art1Info.EG1AttackTime;
                                 if (art1Info.EG1VelocityToAttack > 0) {
@@ -665,6 +718,7 @@ export namespace Synthesizer {
                                 } else {
                                     // Sustain or Release Zone
                                     let dVolume = 1.0;
+                                    let dAttenuation = 96;
                                     if (sec === 0 || decayTime === 0) {
                                         dVolume = 0;
                                         dAttenuation = 96;
@@ -699,7 +753,7 @@ export namespace Synthesizer {
                                 }
                                 eg1Velocity = Math.min(1.0, Math.max(0, eg1Velocity));
                                 eg1Attenuation = Math.min(96, Math.max(0, eg1Attenuation));
-                                if (positionFromReleased === -1 || positionFromReleased === 0 || positionFromReleased === 1) console.log(offset, channelID, noteID, noteInfo.endOffset, noteInfo.length, position, sec, secFromReleased, sec <= attackTime, positionFromReleased <= 0, eg1Velocity, eg1Attenuation, dAttenuation, attackTime, art1Info.EG1AttackTime, art1Info.EG1VelocityToAttack);
+                                // if (positionFromReleased === -1 || positionFromReleased === 0 || positionFromReleased === 1) console.log(offset, channelID, noteID, noteInfo.endOffset, noteInfo.length, position, sec, secFromReleased, sec <= attackTime, positionFromReleased <= 0, eg1Velocity, eg1Attenuation, dAttenuation, attackTime, art1Info.EG1AttackTime, art1Info.EG1VelocityToAttack);
                             }
                             // LFO情報を反映
                             let lfo = 0;
@@ -708,7 +762,7 @@ export namespace Synthesizer {
                                 if (art1Info.LFOToVolume > 0) {
                                     // 遅延が存在する場合は遅延時間以降でサインカーブを生成
                                     if (sec >= art1Info.LFODelay) {
-                                        lfo = Math.sin((sec - art1Info.LFODelay) * Math.PI * 2 / art1Info.LFOFrequency) * art1Info.LFOToVolume;
+                                        lfo = Math.sin((sec - art1Info.LFODelay) * Math.PI * 2 * art1Info.LFOFrequency) * art1Info.LFOToVolume;
                                         lfoAttenuation = lfo;
                                     }
                                 } 
@@ -719,33 +773,60 @@ export namespace Synthesizer {
                                 if (wsmpAttenuation === 0x80000000) {
                                     sampleWaveData = 0;
                                 }
-                                wsmpAttenuation = wsmp.lAttenuation / 65536 / 40;
+                                wsmpAttenuation = wsmp.lAttenuation / 655360;
                             }
-                            if (offset % 1000000 === 1) console.log(offset, channelID, eg1Attenuation, lfoAttenuation, wsmpAttenuation, wsmpAttenuation, 127 - 10 ** ((wsmpAttenuation*40 + lfoAttenuation)), 20 * Math.log10((127**2)-(eg1Attenuation**2)), 0.1 ** ((eg1Attenuation + lfoAttenuation + wsmpAttenuation) / 20));
-                            if (offset % 1000000 === 0) console.log(offset, channelID, art1Info.LFOFrequency, art1Info.LFOToVolume, art1Info.LFOToPitch, art1Info.LFODelay, lfo);
-                            sampleWaveData = (sampleWaveData * (0.1 ** ((eg1Attenuation + wsmpAttenuation + lfoAttenuation) / 20))) * (instrumentInfo.volume / 100.0);
+                            let sampleWaveDataR = sampleWaveData;
+                            let sampleWaveDataL = sampleWaveData;
+                            // PAN考慮
+                            let panAttenuationR = 0;
+                            let panAttenuationL = 0;
+                            if (instrumentInfo.controllers.get(CONTROLLER.PAN)) {
+                                const pan = instrumentInfo.controllers.get(CONTROLLER.PAN);
+                                panAttenuationR = 20 * Math.log10((127/(pan)) ** 0.5)
+                                panAttenuationL = 20 * Math.log10((127/(127-pan)) ** 0.5)
+                            } else if (art1Info.Pan !== 0) {
+                                const pan = 64 - art1Info.Pan / 50 * 64;
+                                panAttenuationR = 20 * Math.log10((127/(pan)) ** 0.5)
+                                panAttenuationL = 20 * Math.log10((127/(127-pan)) ** 0.5)
+                            }
+                            // if (offset % 1000000 === 1) console.log(offset, channelID, eg1Attenuation, lfoAttenuation, wsmpAttenuation, wsmpAttenuation, 127 - 10 ** ((wsmpAttenuation*40 + lfoAttenuation)), 20 * Math.log10((127**2)-(eg1Attenuation**2)), 0.1 ** ((eg1Attenuation + lfoAttenuation + wsmpAttenuation) / 20));
+                            // if (offset % 1000000 === 0) console.log(offset, channelID, art1Info.LFOFrequency, art1Info.LFOToVolume, art1Info.LFOToPitch, art1Info.LFODelay, lfo);
+                            sampleWaveDataR = (sampleWaveData * (0.1 ** ((Math.max(0, eg1Attenuation + wsmpAttenuation + lfoAttenuation + panAttenuationR)) / 20))) * (instrumentInfo.volume / 100.0);
+                            sampleWaveDataL = (sampleWaveData * (0.1 ** ((Math.max(0, eg1Attenuation + wsmpAttenuation + lfoAttenuation + panAttenuationL)) / 20))) * (instrumentInfo.volume / 100.0);
                             if (isNaN(sampleWaveData)) {
                                 console.error(offset, eg1Velocity, lfo, sampleOffset, sampleWaveData, art1Info.EG1ReleaseTime, instrumentInfo.volume);
                             }
-                            waveData[offset] += sampleWaveData;
+                            waveDataR[offset] += sampleWaveDataR;
+                            waveDataL[offset] += sampleWaveDataL;
+                            channelWaveDatas.get(channelID)[0][offset] += sampleWaveDataR;
+                            channelWaveDatas.get(channelID)[1][offset] += sampleWaveDataL;
                             // console.log(offset, attackedOffset, noteInfo, positionDX, art1Info, wsmp, position, sampleOffset, freqRate, sampleWaveData, eg1Velocity, waveLoopLength, waveLoopStart, waveInfo.wave.pcmData.length);
                         }
                     });
                 }
+                if (!channelWaveDataMaxMin.get(channelID)) {
+                    channelWaveDataMaxMin.set(channelID, [channelWaveDatas.get(channelID)[0][offset] || 1, channelWaveDatas.get(channelID)[0][offset] || -1]);
+                } else {
+                    const [max, min] = channelWaveDataMaxMin.get(channelID);
+                    channelWaveDataMaxMin.set(channelID, [
+                        Math.max(max, channelWaveDatas.get(channelID)[0][offset] || 1, channelWaveDatas.get(channelID)[1][offset] || 1), 
+                        Math.min(min, channelWaveDatas.get(channelID)[0][offset] || -1, channelWaveDatas.get(channelID)[1][offset] || -1)
+                    ]);
+                }
             });
-            if (waveData[offset]) {
-                waveDataMax = Math.max(waveDataMax, waveData[offset]);
-                waveDataMin = Math.min(waveDataMin, waveData[offset]);
+            if (waveDataR[offset]) {
+                waveDataRMax = Math.max(waveDataRMax, waveDataR[offset], waveDataL[offset]);
+                waveDataRMin = Math.min(waveDataRMin, waveDataR[offset], waveDataL[offset]);
             }
         }
 
         // -32768~32767に範囲をおさえる(音割れ防止)
-        const correctRate = Math.min(32767 / waveDataMax, -32768 / waveDataMin);
-        console.log(waveDataMax, waveDataMin, correctRate);
+        const correctRate = Math.min(32767 / waveDataRMax, -32768 / waveDataRMin);
+        console.log(waveDataRMax, waveDataRMin, correctRate);
         if (correctRate < 1) {
             for (let offset = 0; offset < maxOffset; offset++) {
-                waveData[offset] *= correctRate * 0.99;
-                waveData[offset] = Math.round(waveData[offset]);
+                waveDataR[offset] = Math.round(waveDataR[offset] *  correctRate * 0.99);
+                waveDataL[offset] = Math.round(waveDataL[offset] *  correctRate * 0.99);
             }
         }
 
@@ -754,15 +835,47 @@ export namespace Synthesizer {
         // console.log(JSON.stringify(waveData.slice(50000, 100000)));
 
         // waveデータをriffに入れて新waveを作成 (Little Endian)
-        for (let i = 0; i < waveData.length; i++) {
-            const subOffset = 44 + i * 2;
-            riffData[subOffset] = (!waveData[i]) ? 0 : waveData[i] & 0xFF
-            riffData[subOffset+1] = (!waveData[i]) ? 0 : ((waveData[i] >> 8) & 0xFF);
+        for (let i = 0; i < waveDataR.length; i++) {
+            const subOffset = 44 + i * 4;
+            riffData[subOffset]   = (!waveDataR[i]) ? 0 : waveDataR[i] & 0xFF;
+            riffData[subOffset+1] = (!waveDataR[i]) ? 0 : ((waveDataR[i] >> 8) & 0xFF);
+            riffData[subOffset+2] = (!waveDataL[i]) ? 0 : waveDataL[i] & 0xFF;
+            riffData[subOffset+3] = (!waveDataL[i]) ? 0 : ((waveDataL[i] >> 8) & 0xFF);
         }
         const ret = new Uint8Array(riffData);
-        setLittleEndianNumberToUint8Array(ret, 4, 4, waveData.length * 2 + 44);
-        setLittleEndianNumberToUint8Array(ret, 40, 4, waveData.length * 2);
-        
-        return ret;
+        setLittleEndianNumberToUint8Array(ret, 4, 4, waveDataR.length * 4 + 44);
+        setLittleEndianNumberToUint8Array(ret, 40, 4, waveDataR.length * 4);
+
+        const channelRiffDatas = new Map<number, Uint8Array>();
+        channelIDs.forEach(channelID => {
+            const waveDataR = channelWaveDatas.get(channelID)[0];
+            const waveDataL = channelWaveDatas.get(channelID)[1];
+
+            const [max, min] = channelWaveDataMaxMin.get(channelID);
+            const correctRate = Math.min(1, 32767 / max, -32768 / min);
+            if (correctRate < 1) {
+                for (let offset = 0; offset < maxOffset; offset++) {
+                    waveDataR[offset] = Math.round(waveDataR[offset] * correctRate * 0.99);
+                    waveDataL[offset] = Math.round(waveDataR[offset] * correctRate * 0.99);
+                }
+            }
+            // RIFFデータを雑に塗り替えながらチャンネル別のwave作成(波形のみ塗りつぶすため問題なし)
+            for (let i = 0; i < waveDataR.length; i++) {
+                const subOffset = 44 + i * 4;
+                riffData[subOffset]   = (!waveDataR[i]) ? 0 : waveDataR[i] & 0xFF;
+                riffData[subOffset+1] = (!waveDataR[i]) ? 0 : ((waveDataR[i] >> 8) & 0xFF);
+                riffData[subOffset+2] = (!waveDataL[i]) ? 0 : waveDataL[i] & 0xFF;
+                riffData[subOffset+3] = (!waveDataL[i]) ? 0 : ((waveDataL[i] >> 8) & 0xFF);
+            }
+            const channelRiffData = new Uint8Array(riffData);
+            setLittleEndianNumberToUint8Array(channelRiffData, 4, 4, waveDataR.length * 4 + 44);
+            setLittleEndianNumberToUint8Array(channelRiffData, 40, 4, waveDataR.length * 4);
+            channelRiffDatas.set(channelID, channelRiffData);
+        });
+
+        const result = new SynthesizeResult();
+        result.waveSegment = ret;
+        result.channelToWaveSegment = channelRiffDatas;
+        return result;
     }
 }

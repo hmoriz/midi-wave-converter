@@ -3,10 +3,7 @@ import { DLS } from "./chunk";
 export type InstrumentData = {
     insChunk : DLS.InsChunk;
     regionMap : Map<number, Map<number, DLS.RgnChunk>>; // noteID -> velocity -> RGN
-    waves : Array<{
-        id : number,
-        wave : DLS.WaveChunk;
-    }>;
+    waves : Map<number, DLS.WaveChunk>;
 };
 
 export class ParseResult {
@@ -41,15 +38,15 @@ export function getFrequencyFromNoteID(noteID : number) {
     return table[offset] * size;
 }
 
+function getWaveChunkFromPtbl(tableIndex : number, ptblChunk : DLS.PtblChunk, waves : Array<DLS.WaveChunk>) : DLS.WaveChunk {
+    const minOffset = Math.min(...waves.map((waveChunk) => waveChunk.offset));
+    const waveOffsetDelta = ptblChunk.poolCues[tableIndex];
+    return waves.find(wave => (wave.offset - minOffset) === waveOffsetDelta);
+}
+
 export class DLSParser{
-    frequencyTable : Array<number>;
 
     constructor() {
-        // MIDI音階 -> Hz
-        this.frequencyTable = new Array<number>();
-        for (let i = 0; i < 128; i++) {
-            this.frequencyTable[i] = getFrequencyFromNoteID(i);
-        }
     }
 
     async parseFile(file : File) : Promise<ParseResult> {
@@ -340,6 +337,27 @@ export class DLSParser{
                         // div.innerText = waveIndex++;
                         // document.body.appendChild(div);
                         // div.appendChild(audio);
+                        let wsmpChunkID = getString(subOffset + 38, 4); // Maybe 'wsmp'
+                        let wsmpChunk : DLS.WsmpChunk;
+                        if (wsmpChunkID === 'wsmp') {
+                            const wsmpLength = data.getUint32(subOffset + 42, true);
+                            wsmpChunk = new DLS.WsmpChunk(subOffset + 38, wsmpLength, {
+                                cbSize       : data.getUint32(subOffset + 46, true),
+                                usUnityNote  : data.getUint16(subOffset + 50, true),
+                                sFineTune    : data.getInt16(subOffset + 52, true),
+                                lAttenuation : data.getInt32(subOffset + 54, true),
+                                fulOptions   : data.getUint32(subOffset + 58, true),
+                                cSampleLoops : data.getUint32(subOffset + 62, true),
+                            });
+                            if (wsmpChunk.cSampleLoops === 1) {
+                                wsmpChunk.waveSampleLoop = {
+                                    cbSize       : data.getUint32(subOffset + 66, true),
+                                    ulLoopType   : data.getUint32(subOffset + 70, true),
+                                    ulLoopStart  : data.getUint32(subOffset + 74, true),
+                                    ulLoopLength : data.getUint32(subOffset + 78, true),
+                                };
+                            }
+                        }
                         let dataChunkID = getString(subOffset + 82, 4); // Maybe 'data'
                         let pcmDataSize = 0;
                         let dataOffset = 0;
@@ -363,6 +381,7 @@ export class DLSParser{
                             segmentData: segment,
                             pcmData: pcmData,
                             waveData: blob,
+                            wsmpChunk: wsmpChunk,
                         });
                         wvplChunk.addChild(waveChunk);
                     } else {
@@ -480,7 +499,7 @@ export class DLSParser{
             const bankID = locale.ulBank;
             const lrgn = insChunk.lrgn;
             const regionMap = new Map<number, Map<number, DLS.RgnChunk>>();
-            let waves = new Array();
+            let waves = new Map<number, DLS.WaveChunk>();
             lrgn.rgnList.forEach((rgn) => {
                 const rgnh = rgn.rgnh;
                 if (!rgnh) {
@@ -492,7 +511,8 @@ export class DLSParser{
                 const velocityLow  = rgnh.rangeVelocity.usLow;
                 const velocityHigh = rgnh.rangeVelocity.usHigh
                 const wlnk = rgn.wlnk;
-                waves.push({id: wlnk.ulTableIndex, wave: wpls.waveList[wlnk.ulTableIndex]});
+                const ptblChunk = chunks.find(chunk => chunk instanceof DLS.PtblChunk) as DLS.PtblChunk;
+                waves.set(wlnk.ulTableIndex, getWaveChunkFromPtbl(wlnk.ulTableIndex, ptblChunk, wpls.waveList));
                 for (let i = keylow; i <= keyHigh; i++) {
                     regionMap.set(i, new Map<number, DLS.RgnChunk>());
                     for (let j = velocityLow; j <= velocityHigh; j++) {

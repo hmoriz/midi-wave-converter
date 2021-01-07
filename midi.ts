@@ -81,10 +81,10 @@ export class MIDIParser {
             e.length = 2;
             e.isProgramChangeEvent = true;
             e.programID = this._data.getUint8(offset + 1);
-            console.warn('Unknown', offset.toString(16));
         } else if (0xD0 <= command && command <= 0xDF) {
             // 
             e.length = 2;
+            console.warn('Unknown', offset.toString(16));
         } else if (0xE0 <= command && command <= 0xEF) {
             // PITCH BEND 
             e.length = 3;
