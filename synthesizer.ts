@@ -263,7 +263,7 @@ export namespace Synthesizer {
         }
     }
 
-    export function synthesizeMIDI(midi : MidiParseInfo, dls : DLSParseInfo) :  SynthesizeResult {
+    export async function synthesizeMIDI(midi : MidiParseInfo, dls : DLSParseInfo) :  Promise<SynthesizeResult> {
         const riffData = new Array<number>(); // uint8
         const waveDataR = new Array<number>(); // int16
         const waveDataL = new Array<number>(); // int16
@@ -429,7 +429,7 @@ export namespace Synthesizer {
                         tickTempoMap.set(tick, tempo);
                     }
                 } else {
-                    throw new Error();
+                    throw new Error(JSON.stringify(mtrkEvent));
                 }
             });
             maxTick = Math.max(maxTick, tick);
@@ -518,13 +518,9 @@ export namespace Synthesizer {
         // channeiID -> [waveDataMin, waveDataMax]
         const channelWaveDataMaxMin = new Map<number, [number, number]>();
 
-        const loadingArea = document.getElementById('loadingarea');
         for (let offset = 0; offset < maxOffset; offset++) {
             if (offset % 10000 === 0) {
                 console.log("Synthesize Processing... ", offset, "/", Math.ceil(maxOffset));
-                requestAnimationFrame(() => {
-                    loadingArea.innerText = `Synthesizing...(${Math.floor(1000 * offset / maxOffset) / 10}%)`;
-                });
             }
             waveDataR[offset] = 0;
             waveDataL[offset] = 0;
@@ -889,7 +885,6 @@ export namespace Synthesizer {
                 waveDataRMin = Math.min(waveDataRMin, waveDataR[offset], waveDataL[offset]);
             }
         }
-        loadingArea.innerText = "";
 
         // -32768~32767に範囲をおさえる(音割れ防止)
         const correctRate = Math.min(32767 / waveDataRMax, -32768 / waveDataRMin);

@@ -1,10 +1,9 @@
-import { DLS } from "./chunk";
 import { DLSParser, getFrequencyFromNoteID, ParseResult as DLSParseResult } from "./dls";
 import { MIDIParser } from "./midi";
 import { Synthesizer } from "./synthesizer";
 import Chart from 'chart.js';
 
-function getLittleEndianNumberFromUint8Array(/**@type {Uint8Array}*/data, offset, size) {
+function getLittleEndianNumberFromUint8Array(data : Uint8Array, offset : number, size : number) : number {
     let ret = 0;
     for (let i = 0; i < size; i++) {
         ret += data[offset + i] << (i * 8);
@@ -12,16 +11,16 @@ function getLittleEndianNumberFromUint8Array(/**@type {Uint8Array}*/data, offset
     return ret;
 }
 
-function setLittleEndianNumberToUint8Array(/**@type {Uint8Array} */data, offset, size, value) {
+function setLittleEndianNumberToUint8Array(data : Uint8Array, offset, size, value) {
     for (let i = 0; i < size; i++) {
         data.set([(value >> (i * 8)) & 0xff], offset+i);
     }
 }
 
-function makeChart(wpls) {
+function makeChart(size : number) {
     const datasets = new Array();
     const labels = new Array();
-    for (let i = 0; i < 100000; i++) {
+    for (let i = 0; i < size; i++) {
         labels.push(i.toString());
     }
     const c = new Chart(canvas, 
@@ -35,7 +34,7 @@ function makeChart(wpls) {
                 responsive: true,
                 title: {
                     display: true,
-                    text: 'test',
+                    text: 'sample',
                 },
                 scales: {
                     xAxes: [{
@@ -55,27 +54,15 @@ function makeChart(wpls) {
             }
         }
     );
-    window["c"] = c;
-    wpls.waveList.forEach((wpl) => {
-        if (datasets.length >= 4)return;
-        const segment = wpl.segmentData;
-        const waveData = new Uint8Array(segment.slice(90));
-        const waveValues = new Array();
-        for (let i = 0; i < Math.min(waveData.length / 2, 1000); i++ ){
-            let v = getLittleEndianNumberFromUint8Array(waveData, i * 2, 2);
-            if (v > 32768) {
-                v = -((65536 - v) & 32767);
-            }
-            if (v === 32768) {v = -v}
-            waveValues.push(v);
-        }
-        addChart(c, waveValues)
-    });
-    console.log(c);
     return c;
 }
 
-function addChart(/** @type {Chart} */c, dataArray) {
+function resetChart(c : Chart) {
+    c.data.datasets = [];
+    c.update();
+}
+
+function addChartData(/** @type {Chart} */c : Chart, dataArray) {
     c.data.datasets.push({
         label: (c.data.datasets.length + 1).toString(),
         data: dataArray,
@@ -85,7 +72,7 @@ function addChart(/** @type {Chart} */c, dataArray) {
     c.update();
 }
 
-function addChartFromUint8ToInt16(/** @type {Chart} */c, /** @type {Uint8Array} */ dataArray) {
+function addChartFromUint8ToInt16(c : Chart, dataArray : Uint8Array) {
     const newArray = new Array();
     for (let i = 0; i < dataArray.length / 2; i++) {
         let v = getLittleEndianNumberFromUint8Array(dataArray, i * 2, 2);
@@ -95,13 +82,12 @@ function addChartFromUint8ToInt16(/** @type {Chart} */c, /** @type {Uint8Array} 
         if (v === 32768) {v = -v}
         newArray.push(v);
     }
-    addChart(c, newArray);
+    addChartData(c, newArray);
 }
 
-/** @type {HTMLCanvasElement} */
-let canvas;
-/** @type {DLSParseResult} */
-let dlsParseResult;
+let canvas : HTMLCanvasElement;
+let dlsParseResult : DLSParseResult;
+let chart : Chart;
 async function loadDLSFile(e : Event) {
     const files = (e.target as HTMLInputElement).files;
     for (let i = 0; i < files.length; i++) {
@@ -110,12 +96,11 @@ async function loadDLSFile(e : Event) {
         const parser = new DLSParser();
         const parseResult = await parser.parseFile(file);
         dlsParseResult = parseResult;
-        const {wpls, instrumentIDNameBankMap, instrumentIDMap} = parseResult;
+        const {instrumentIDNameBankMap, instrumentIDMap} = parseResult;
 
         console.log(instrumentIDMap);
 
-        makeChart(wpls);
-
+        // 雑にサンプル作成
         instrumentIDNameBankMap.forEach((inamBankIDDataMap, id) => {
             const pElem = document.createElement('p');
             pElem.innerText = id.toString();
@@ -461,14 +446,14 @@ async function loadDLSFile(e : Event) {
     }
 }
 
-async function loadMIDIFile(/** @type {Event} */ e) {
-    for (let i = 0; i < e.target.files.length; i++) {
+async function loadMIDIFile(e : Event) : Promise<void> {
+    for (let i = 0; i < (e.target as HTMLInputElement).files.length; i++) {
         /** @type {File} */
-        const file = e.target.files[i];
+        const file = (e.target as HTMLInputElement).files[i];
         const parser = new MIDIParser();
         const parseResult = await parser.parseFile(file);
         console.log(parseResult);
-        const synthesizeResult = Synthesizer.synthesizeMIDI(parseResult, dlsParseResult);
+        const synthesizeResult = await Synthesizer.synthesizeMIDI(parseResult, dlsParseResult);
         const blob = new Blob([synthesizeResult.waveSegment]);
         const url = window.URL.createObjectURL(blob);
         const newAudio = document.createElement('audio');
@@ -494,8 +479,22 @@ async function loadMIDIFile(/** @type {Event} */ e) {
             channelAudio.controls = true;
             div.appendChild(channelAudio)
             document.getElementById("audioarea").appendChild(div);       
-        })
-        addChartFromUint8ToInt16(window["c"], synthesizeResult.waveSegment.slice(130000, 350000));
+        });
+
+        // 先頭のサンプルチャートを雑に作成
+        const dataSize = 1000;
+        if (chart) {
+            resetChart(chart);
+        } else {
+            chart = makeChart(dataSize);
+        }
+        let firstNonZeroOffset = synthesizeResult.waveSegment.findIndex((value, offset) => offset >= 100 && value !== 0);
+        const dataset = new Uint8Array(dataSize*2);
+        for (let i = 0; i < dataSize; i++) {
+            const offset = firstNonZeroOffset + i * 1000;
+            dataset.set(synthesizeResult.waveSegment.slice(offset, offset+2), i*2);
+        }
+        addChartFromUint8ToInt16(chart, dataset);
     }
 }
 

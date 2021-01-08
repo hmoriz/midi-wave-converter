@@ -169,7 +169,8 @@ export class MIDIParser {
                 }
             } else if (eventType < 0x80) {
                 // 同じチャンネルに複数ノーツを並べることができるやつがあるかも
-                if (0x90 <= lastEventType && lastEventType <= 0x9F) {
+                if ((0x90 <= lastEventType && lastEventType <= 0x9F) || 
+                    (0xB0 <= lastEventType && lastEventType <= 0xBF)) {
                     eventType = lastEventType;
                     const e = this._parseMIDIEvent(subOffset + deltaSize - 1, lastEventType);
                     event = e;
