@@ -220,7 +220,7 @@ export namespace DLS {
         CONN_EG2_DECAY   : 0x030B,
         CONN_EG2_RESERVED: 0x030C,  // <-- NOTE : これは gm.gls ではたぶんSUSTAIN LEVEL
         CONN_EG2_RELEASE : 0x030D,
-        CONN_EG2_SUSTAIN : 0x030E,
+        CONN_EG2_SUSTAIN : 0x030E,  // <- 謎
     }
 
     export type Art1Source = typeof ART1SOURCE[keyof typeof ART1SOURCE];

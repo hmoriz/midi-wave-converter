@@ -40,13 +40,18 @@ export class MIDIParser {
         return ret;
     };
 
-    private _parseMIDIEvent(offset : number) : MIDI.MIDIEvent {
+    private _parseMIDIEvent(offset : number, c? : number) : MIDI.MIDIEvent {
         const e = new MIDI.MIDIEvent();
         e.length = 0;
-        const command = this._data.getUint8(offset);
+        let command : number;
+        if (c !== undefined && c !== null) {
+            command = c;
+        } else {
+            command = this._data.getUint8(offset);
+        }
         e.channel = command & 0x0F;
         if (command <= 0x7F) {
-            console.error("Unknown command" + command.toString(16));
+            console.error("Unknown command", offset.toString(16), command.toString(16));
         } else if (0x80 <= command && command <= 0x8F) {
             // NOTE_OFF
             e.noteID = 0;
@@ -93,7 +98,7 @@ export class MIDIParser {
             const msb = this._data.getUint8(offset + 2);
             e.value1 = ((lsb & 0x7F) + ((msb & 0x7F) << 7)) - 0x2000;
         } else {
-            console.warn('Unknown', offset.toString(16));
+            console.warn('Unknown', c, offset.toString(16));
         }
         e.value = (new Uint8Array(this._arrayBuffer)).slice(offset, offset+e.length);
         return e;
@@ -121,6 +126,7 @@ export class MIDIParser {
         const mtrk = new MIDI.MTrkChunk(offset, chunkSize);
 
         let subOffset = offset + 8;
+        let lastEventType = 0;
         while (subOffset < offset + 8 + chunkSize) {
             let deltaSize = 1;
             let delta = this._data.getUint8(subOffset);
@@ -133,7 +139,8 @@ export class MIDIParser {
                     delta = (delta << 7) + (subDelta & 0x7F);
                 }
             }
-            const eventType = this._data.getUint8(subOffset + deltaSize);
+            let eventType = this._data.getUint8(subOffset + deltaSize);
+            // console.log("parse mtrk...", subOffset.toString(16), (subOffset+deltaSize).toString(16), eventType.toString(16));
             let eventSize = chunkSize;
             let event : MIDI.MIDIEvent | MIDI.SysExEvent | MIDI.MetaEvent;
             if (eventType >= 0xF0) {
@@ -160,6 +167,14 @@ export class MIDIParser {
                         console.warn('unknown eventtype', subOffset.toString(16), delta, eventType);
                         return mtrk;
                 }
+            } else if (eventType < 0x80) {
+                // 同じチャンネルに複数ノーツを並べることができるやつがあるかも
+                if (0x90 <= lastEventType && lastEventType <= 0x9F) {
+                    eventType = lastEventType;
+                    const e = this._parseMIDIEvent(subOffset + deltaSize - 1, lastEventType);
+                    event = e;
+                    eventSize = e.length - 1;
+                }
             } else {
                 const e = this._parseMIDIEvent(subOffset + deltaSize);
                 event = e;
@@ -169,6 +184,7 @@ export class MIDIParser {
             mtrkEvent.event = event;
             mtrk.Events.push(mtrkEvent);
             subOffset += deltaSize + eventSize;
+            lastEventType = eventType;
         }
         return mtrk;
     }

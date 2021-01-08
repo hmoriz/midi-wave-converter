@@ -2,7 +2,7 @@ import { DLS } from "./chunk";
 import { DLSParser, getFrequencyFromNoteID, ParseResult as DLSParseResult } from "./dls";
 import { MIDIParser } from "./midi";
 import { Synthesizer } from "./synthesizer";
-const Chart = require('chart.js');
+import Chart from 'chart.js';
 
 function getLittleEndianNumberFromUint8Array(/**@type {Uint8Array}*/data, offset, size) {
     let ret = 0;
@@ -55,7 +55,7 @@ function makeChart(wpls) {
             }
         }
     );
-    window.c = c;
+    window["c"] = c;
     wpls.waveList.forEach((wpl) => {
         if (datasets.length >= 4)return;
         const segment = wpl.segmentData;
@@ -102,10 +102,11 @@ function addChartFromUint8ToInt16(/** @type {Chart} */c, /** @type {Uint8Array} 
 let canvas;
 /** @type {DLSParseResult} */
 let dlsParseResult;
-async function loadDLSFile(/** @type {Event} */ e) {
-    for (let i = 0; i < e.target.files.length; i++) {
+async function loadDLSFile(e : Event) {
+    const files = (e.target as HTMLInputElement).files;
+    for (let i = 0; i < files.length; i++) {
         /** @type {File} */
-        const file = e.target.files[i];
+        const file : File = files[i];
         const parser = new DLSParser();
         const parseResult = await parser.parseFile(file);
         dlsParseResult = parseResult;
@@ -117,30 +118,39 @@ async function loadDLSFile(/** @type {Event} */ e) {
 
         instrumentIDNameBankMap.forEach((inamBankIDDataMap, id) => {
             const pElem = document.createElement('p');
-            pElem.innerText = id;
+            pElem.innerText = id.toString();
             inamBankIDDataMap.forEach((bankIDDataMap, inam) => {
                 const cdiv = document.createElement('div');
                 cdiv.innerText = '☆ ' + inam;
                 bankIDDataMap.forEach((data, bankID) => {
                     const {insChunk} = data;
-                    const lart = insChunk.lart;
-                    const art1Info = Synthesizer.getArt1InfoFromLarts(lart)
-                    console.log(id, bankID, insChunk, lart, art1Info);
-                    if (art1Info && (art1Info.EG2AttackTime > 0 || art1Info.EG2DecayTime > 0 || art1Info.EG2ReleaseTime > 0)) {
-                        console.log(id, inam, bankID, art1Info.EG2AttackTime, art1Info.EG2DecayTime, art1Info.EG2ReservedTime, art1Info.EG2ReleaseTime, art1Info.EG2SustainLevel, art1Info.EG2ToPitch, art1Info);
-                    }
+                    let lart = insChunk.lart;
+                    let art1Info = Synthesizer.getArt1InfoFromLarts(lart);
+                    console.log(id, bankID, insChunk, lart, art1Info, data.waves);
                     const button = document.createElement('button');
-                    button.innerText = bankID;
+                    button.innerText = bankID.toString();
                     button.addEventListener('click', () => {
                         const ccdiv = document.createElement('div');
                         ccdiv.innerText = '● ' + bankID;
                         ccdiv.appendChild(document.createElement('br'));
-                        data.regionMap.forEach((velocityRegionDataMap, noteID) => {
-                            const regionData = velocityRegionDataMap.get(100); // 数が多すぎるので
+                        // とりあえずボリュームは100で固定させ, ノートIDを変化させてサンプルを用意する
+                        for (let noteID = 0; noteID < 128; noteID++) {
+                            const regionData = data.insChunk.lrgn.rgnList.find(rgn => {
+                                return rgn.rgnh.rangeKey.usLow <= noteID && 
+                                    noteID <= rgn.rgnh.rangeKey.usHigh &&
+                                    rgn.rgnh.rangeVelocity.usLow <= 100 &&
+                                    100 <=  rgn.rgnh.rangeVelocity.usHigh;
+                            });
+                            if (!lart) {
+                                lart = regionData.lart;
+                                art1Info = Synthesizer.getArt1InfoFromLarts(lart);
+                            }
+                            console.log(inam, noteID, regionData, data.insChunk, lart, art1Info);
+                            if (!regionData) continue;
                             const wsmp = regionData.wsmp;
                             const wlnk = regionData.wlnk;
                             // const lart = regionData.lart;
-                            // console.log(lart);
+                            // console.log(inam, lart);
                             if (!wlnk) return;
                             const wave = {
                                 id: wlnk.ulTableIndex,
@@ -162,11 +172,11 @@ async function loadDLSFile(/** @type {Event} */ e) {
                                 const dataSize = getLittleEndianNumberFromUint8Array(segment, 86, 4);
                                 const blockAlign = getLittleEndianNumberFromUint8Array(segment, 32, 2); // たぶん2 (16bit monoral)
                                 if (blockAlign !== 2) {
-                                    throw new Error("Sorry! not implemented for blockAlign ", blockAlign);
+                                    throw new Error("Sorry! not implemented for blockAlign " + blockAlign);
                                 }
                                 let waveDataSegment = new Int16Array(dataSize / blockAlign);
                                 for(let i = 0; i < dataSize / blockAlign; i++) {
-                                    const v = getLittleEndianNumberFromUint8Array(segment, 90 + (i * blockAlign), blockAlign);
+                                    let v = getLittleEndianNumberFromUint8Array(segment, 90 + (i * blockAlign), blockAlign);
                                     if (v > 0x8000) {
                                         v = -((0x10000 - v) & 0x7FFF);
                                     }
@@ -186,7 +196,7 @@ async function loadDLSFile(/** @type {Event} */ e) {
                                     if (art1Info) {
                                         sec = Math.max(sec, art1Info.EG1AttackTime + art1Info.EG1DecayTime, art1Info.EG1AttackTime + art1Info.EG1ReleaseTime);
                                     }
-                                    const loopCount = Math.max(50, Math.round(sec / (loopLength / baseBitRate)));
+                                    const loopCount = Math.min(1000, Math.max(50, Math.round(sec / (loopLength / baseBitRate))));
                                     const loopBlock = waveDataSegment.slice(loopStart, loopStart + loopLength);
                                     
                                     const newWaveDataSegmentSize = (dataSize / blockAlign) + loopLength * (loopCount - 1);
@@ -202,7 +212,7 @@ async function loadDLSFile(/** @type {Event} */ e) {
                                 // Hz改変
                                 const altFreq = getFrequencyFromNoteID(noteID);
                                 const freqRate = altFreq / baseFreq;
-                                let newWaveDataSegment = new Uint16Array(waveDataSegment.length);
+                                let newWaveDataSegment = new Int16Array(waveDataSegment.length);
                                 let lastX = 0;
                                 let sampleOffsetSpeedGain = 0; // EG2のdxを累積させる用
                                 let minY = -1;
@@ -281,12 +291,12 @@ async function loadDLSFile(/** @type {Event} */ e) {
                                             // sFineTune を加味 (NOTE : DLSの仕様では65536で割るべきっぽいけどgm.dlsのfineTuneの内容的に行わない)
                                             sampleOffsetSpeedCents += wsmp.sFineTune;
                                         }
-                                        // dx : 増加率 (0は等倍, 1につき1オクターブ)
-                                        nextSampleOffsetSpeedGain = (2 ** (sampleOffsetSpeedCents / 1200)) - 1.0;
-                                        if (sec <= 3 && i % 10000 === 0)
-                                            console.log(noteID, i, x, sec, freqRate, lastX, nextSampleOffsetSpeedGain, sampleOffsetSpeedCents, art1Info.LFOToPitch);
+                                        // dx : 増加率 (1は等倍, 1につき1オクターブ)
+                                        nextSampleOffsetSpeedGain = (2 ** (sampleOffsetSpeedCents / 1200));
+                                        // if (sec <= 3 && i % 10000 === 0)
+                                        //     console.log(noteID, i, x, sec, freqRate, lastX, nextSampleOffsetSpeedGain, sampleOffsetSpeedCents, art1Info.LFOToPitch);
                                     }
-                                    let x = lastX + freqRate * (1.0 + nextSampleOffsetSpeedGain);
+                                    let x = lastX + freqRate * nextSampleOffsetSpeedGain;
                                     sampleOffsetSpeedGain = nextSampleOffsetSpeedGain;
                                     lastX = x;
                                     let y;
@@ -304,13 +314,27 @@ async function loadDLSFile(/** @type {Event} */ e) {
                                     let dAttenuation = 96;
                                     let eg1Attenuation = 96;
                                     if (art1Info) {
-                                        let attackTime = art1Info.EG1AttackTime;
-                                        if (art1Info.EG1VelocityToAttack > 0) {
-                                            attackTime -= Synthesizer.getSecondsFromArt1Scale(art1Info.EG1VelocityToAttack * (100 / 128));
+                                        let attackTime = 0;
+                                        let attackTimeCent = 0;
+                                        if (art1Info.EG1AttackTime > 0) {
+                                            attackTimeCent = art1Info.EG1AttackTime;
                                         }
-                                        let decayTime = art1Info.EG1DecayTime;
+                                        if (art1Info.EG1VelocityToAttack > 0) {
+                                            attackTimeCent += art1Info.EG1VelocityToAttack * (100 / 128);
+                                        }
+                                        if (attackTimeCent > 0) {
+                                            attackTime = Synthesizer.getSecondsFromArt1Scale(attackTimeCent);
+                                        }
+                                        let decayTime = 0;
+                                        let decayTimeCent = 0;
+                                        if (art1Info.EG1DecayTime > 0) {
+                                            decayTimeCent = art1Info.EG1DecayTime;
+                                        }
                                         if (art1Info.EG1KeyToDecay > 0) {
-                                            decayTime += Synthesizer.getSecondsFromArt1Scale(art1Info.EG1KeyToDecay * (noteID / 128));
+                                            decayTimeCent += art1Info.EG1KeyToDecay * (100 / 128);
+                                        }
+                                        if (decayTimeCent > 0) {
+                                            decayTime = Synthesizer.getSecondsFromArt1Scale(decayTimeCent);
                                         }
                                         if (sec < attackTime) {
                                             // Attack Zone
@@ -409,12 +433,12 @@ async function loadDLSFile(/** @type {Event} */ e) {
                                 const newBlob = new Blob([newSegment], { type: 'audio/wav' });
                                 audio.src = window.URL.createObjectURL(newBlob);
                             } else {
-                                audio.src = wave.wData.wave;
+                                audio.src = window.URL.createObjectURL(wave.wData.waveData);
                             }
                             audio.controls = true;
                             span.appendChild(audio);
                             ccdiv.appendChild(span);
-                        });
+                        };
                         // data.waves.forEach(wdata => {
                         //     const span = document.createElement('span');
                         //     span.style.display = 'inline-block';
@@ -450,10 +474,19 @@ async function loadMIDIFile(/** @type {Event} */ e) {
         const newAudio = document.createElement('audio');
         newAudio.src = url;
         newAudio.controls = true;
-        document.getElementById("audioarea").appendChild(newAudio);
+
+        const audioDiv = document.createElement("div");
+        audioDiv.innerText = `${file.name} => WAVE : `;
+        audioDiv.appendChild(newAudio);
+
+        const audioArea = document.getElementById("audioarea");
+        audioArea.appendChild(audioDiv);
+
         synthesizeResult.channelToWaveSegment.forEach((waveSegment, channelID) => {
             const div = document.createElement('div');
-            div.innerText = `● ${channelID} :   `;
+            const iLocale = synthesizeResult.channelToInstrument.get(channelID)?.insh.Locale;
+            const inam = synthesizeResult.channelToInstrument.get(channelID)?.info?.dataMap.get("INAM");
+            div.innerText = `● ${channelID} (${iLocale.ulInstrument} ${iLocale.ulBank}  ${inam}):  `;
             const blob = new Blob([waveSegment]);
             const url = window.URL.createObjectURL(blob);
             const channelAudio = document.createElement('audio');
@@ -462,7 +495,7 @@ async function loadMIDIFile(/** @type {Event} */ e) {
             div.appendChild(channelAudio)
             document.getElementById("audioarea").appendChild(div);       
         })
-        addChartFromUint8ToInt16(window.c, synthesizeResult.waveSegment.slice(130000, 350000));
+        addChartFromUint8ToInt16(window["c"], synthesizeResult.waveSegment.slice(130000, 350000));
     }
 }
 
