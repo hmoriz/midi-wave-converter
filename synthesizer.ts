@@ -354,7 +354,7 @@ export namespace Synthesizer {
                     } else if (mtrkEvent.event.isControlEvent) {
                         const lastTick = channelToInstrumentLastTick.get(mtrkEvent.event.channel);
                         let channelInfo : ChannelInfo
-                        if (lastTick) {
+                        if (channelToInstrumentLastTick.has(mtrkEvent.event.channel)) {
                             let lastInstrument = tickInstrumentMap.get(mtrkEvent.event.channel).get(lastTick)
                             channelInfo = new ChannelInfo(lastInstrument);
                         } else {
@@ -427,12 +427,12 @@ export namespace Synthesizer {
                         // Program ID
                         const lastTick = channelToInstrumentLastTick.get(mtrkEvent.event.channel);
                         let channelInfo = new ChannelInfo();
-                        if (lastTick) {
+                        if (channelToInstrumentLastTick.has(mtrkEvent.event.channel)) {
                             let lastInstrument = tickInstrumentMap.get(mtrkEvent.event.channel).get(lastTick);
                             channelInfo = new ChannelInfo(lastInstrument);
                         }
                         channelInfo.instrumentID = mtrkEvent.event.programID;
-                        if (!tickInstrumentMap.get(mtrkEvent.event.channel)) tickInstrumentMap.set(mtrkEvent.event.channel, new Map());
+                        if (!tickInstrumentMap.has(mtrkEvent.event.channel)) tickInstrumentMap.set(mtrkEvent.event.channel, new Map());
                         tickInstrumentMap.get(mtrkEvent.event.channel).set(tick, channelInfo);
                         channelToInstrumentLastTick.set(mtrkEvent.event.channel, tick);
                     } else if (mtrkEvent.event.isPitchBendChangeEvent) {
@@ -744,7 +744,6 @@ export namespace Synthesizer {
                                 const y2 = waveChunk.pcmData[x2];
                                 sampleWaveData = (x2 - sampleOffset) * y1 + (sampleOffset - x1) * y2;
                             }
-                            sampleWaveData = Math.round(sampleWaveData * (noteInfo.velocity / 100));
                             // EG1(Envelope Generator for Volume)情報を反映
                             // NOTE : AttenuationはdB単位で取得し最後に雑に指数関数的に減衰させる
                             let eg1Velocity = 1.0;
