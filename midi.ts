@@ -1,8 +1,9 @@
 import { MIDI } from "./chunk";
 
 export class ParseResult {
-    mthd : MIDI.MThdChunk;
-    mtrks : Array<MIDI.MTrkChunk>;
+    mthd    : MIDI.MThdChunk;
+    mtrks   : Array<MIDI.MTrkChunk>;
+    usingXG : boolean;
 
     constructor() {
         this.mtrks = new Array();
@@ -13,7 +14,6 @@ export class MIDIParser {
     private _arrayBuffer : ArrayBuffer;
     private _data : DataView;
     constructor() {
-
     }
 
     async parseFile(file : File) : Promise<ParseResult> {
@@ -87,7 +87,7 @@ export class MIDIParser {
             e.isProgramChangeEvent = true;
             e.programID = this._data.getUint8(offset + 1);
         } else if (0xD0 <= command && command <= 0xDF) {
-            // 
+            // CHANNEL_KEY_PRESSURE
             e.length = 2;
             console.warn('Unknown', offset.toString(16));
         } else if (0xE0 <= command && command <= 0xEF) {
@@ -117,13 +117,14 @@ export class MIDIParser {
         return e;
     }
 
-    private _parseMtrkChunk(offset : number) : MIDI.MTrkChunk {
+    private _parseMtrkChunk(offset : number) : [MIDI.MTrkChunk, boolean] {
         const chunkKey = this._getString(offset, 4);
         const chunkSize = this._data.getUint32(offset + 4, false);
         if (chunkKey !== 'MTrk') {
             throw new Error('File does NOT have MTrk Header : ' + chunkKey);
         }
         const mtrk = new MIDI.MTrkChunk(offset, chunkSize);
+        let usingXG = false;
 
         let subOffset = offset + 8;
         let lastEventType = 0;
@@ -148,9 +149,13 @@ export class MIDIParser {
                     case 0xF0: 
                     case 0xF7: {
                         const length = this._data.getUint8(subOffset + deltaSize + 1);
-                        const data = (new Uint8Array(this._arrayBuffer)).slice(subOffset+3, subOffset+3+length);
+                        const data = (new Uint8Array(this._arrayBuffer)).slice(subOffset+deltaSize+2, subOffset+deltaSize+2+length);
                         const e = new MIDI.SysExEvent();
                         e.escapingType = eventType === 0xF7;
+                        if (data[0] === 0x43) {
+                            // 他の中身は一旦無視して, XG宣言とする
+                            usingXG = true;
+                        }
                         e.length = length;
                         e.value = data;
                         event = e;
@@ -165,7 +170,7 @@ export class MIDIParser {
                     }
                     default:
                         console.warn('unknown eventtype', subOffset.toString(16), delta, eventType);
-                        return mtrk;
+                        return [mtrk, false];
                 }
             } else if (eventType < 0x80) {
                 // 同じチャンネルに複数ノーツを並べることができるやつがあるかも
@@ -187,7 +192,7 @@ export class MIDIParser {
             subOffset += deltaSize + eventSize;
             lastEventType = eventType;
         }
-        return mtrk;
+        return [mtrk, usingXG];
     }
 
     private _parseMIDI(arrayBuffer : ArrayBuffer) : ParseResult {
@@ -208,8 +213,9 @@ export class MIDIParser {
 
         let mtrkChunkOffset = 14;
         while (mtrkChunkOffset < arrayBuffer.byteLength) {
-            const mtrk = this._parseMtrkChunk(mtrkChunkOffset);
+            const [mtrk, usingMtrk] = this._parseMtrkChunk(mtrkChunkOffset);
             ret.mtrks.push(mtrk);
+            ret.usingXG = ret.usingXG || usingMtrk;
             mtrkChunkOffset += mtrk.size + 8; 
         }
 

@@ -230,6 +230,9 @@ export namespace Synthesizer {
 
         rpnLSB         : number = 127;
         rpnMSB         : number = 127;
+        nRPNLSB        : number = 127;
+        nRPNMSB        : number = 127;
+        usingNrpn      : boolean = false;
 
         pitchBendSensitivity : number = 2;
 
@@ -380,16 +383,42 @@ export namespace Synthesizer {
                             channelInfo.expression = mtrkEvent.event.value1;
                         } else if (mtrkEvent.event.controlCommand === 0x06) {
                             // RPN Data Entry
-                            if (channelInfo.rpnMSB === 0 && channelInfo.rpnLSB === 0 ) {
-                                console.error("PitchBend Sensitivity", mtrkEvent.event.value1);
-                                channelInfo.pitchBendSensitivity = mtrkEvent.event.value1;
+                            if (channelInfo.usingNrpn) {
+                                // NRPN
+                                console.warn("not implemented NRPN", mtrkEvent.event.channel, channelInfo.nRPNMSB.toString(16), channelInfo.nRPNLSB.toString(16), mtrkEvent.event.value1);
+                            } else {
+                                // RPN
+                                if (channelInfo.rpnMSB === 0 && channelInfo.rpnLSB === 0 ) {
+                                    // Pitchbend Sensitivity
+                                    channelInfo.pitchBendSensitivity = mtrkEvent.event.value1;
+                                } else {
+                                    console.warn("not inplemented RPN", mtrkEvent.event.channel, channelInfo.rpnMSB.toString(16), channelInfo.rpnLSB.toString(16));
+                                }
                             }
+                        } else if (mtrkEvent.event.controlCommand == 98) {
+                            // NRPN LSB
+                            if (!midi.usingXG) {
+                                console.error("This MIDI is not using XG!");
+                            }
+                            channelInfo.nRPNLSB = mtrkEvent.event.value1;
+                            channelInfo.usingNrpn = true;
+                        } else if (mtrkEvent.event.controlCommand === 99) {
+                            // NRPN MSB
+                            if (!midi.usingXG) {
+                                console.error("This MIDI is not using XG!");
+                            }
+                            channelInfo.nRPNMSB = mtrkEvent.event.value1;
+                            channelInfo.usingNrpn = true;
                         } else if (mtrkEvent.event.controlCommand === 100) {
                             // RPN LSB
                             channelInfo.rpnLSB = mtrkEvent.event.value1;
+                            channelInfo.usingNrpn = false;
                         } else if (mtrkEvent.event.controlCommand === 101) {
                             // RPN MSB
                             channelInfo.rpnMSB = mtrkEvent.event.value1;
+                            channelInfo.usingNrpn = false;
+                        }else {
+                            console.warn("not implemented Control Command", mtrkEvent.event.channel, mtrkEvent.event.controlCommand.toString(16), mtrkEvent.event);
                         }
                         if (!tickInstrumentMap.get(mtrkEvent.event.channel)) tickInstrumentMap.set(mtrkEvent.event.channel, new Map());
                         tickInstrumentMap.get(mtrkEvent.event.channel).set(tick, channelInfo);
@@ -411,6 +440,7 @@ export namespace Synthesizer {
                         tickPitchBendMap.get(mtrkEvent.event.channel).set(tick, mtrkEvent.event.value1);
                     }
                 } else if (mtrkEvent.event instanceof MIDI.SysExEvent) {
+                    console.log("SysEx", mtrkEvent.event);
                 } else if (mtrkEvent.event instanceof MIDI.MetaEvent) {
                     if (mtrkEvent.event.metaEventType === 0x51) {
                         // tempo event
