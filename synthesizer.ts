@@ -1,31 +1,11 @@
 import { DLS, MIDI } from "./chunk";
-import { getFrequencyFromNoteID, InstrumentData, ParseResult as DLSParseInfo } from './dls';
+import { InstrumentData, ParseResult as DLSParseInfo } from './dls';
 import { ParseResult as MidiParseInfo } from "./midi";
+import { Util } from "./util";
 
 export namespace Synthesizer {
 
-    function getBigEndianNumberFromUint8Array(data : Uint8Array, offset : number, size : number) {
-        let ret = 0;
-        for (let i = 0; i < size; i++) {
-            ret = (ret << 8) + data[offset + i];
-        }
-        return ret;
-    }
-
-    function getLittleEndianNumberFromUint8Array(data : Uint8Array, offset : number, size : number) {
-        let ret = 0;
-        for (let i = 0; i < size; i++) {
-            ret += data[offset + i] << (i * 8);
-        }
-        return ret;
-    }
-    
-    function setLittleEndianNumberToUint8Array(data : Uint8Array, offset : number, size : number, value : number) {
-        for (let i = 0; i < size; i++) {
-            data.set([(value >> (i * 8)) & 0xff], offset+i);
-        }
-    }
-    
+    // art1Infoのtime Cents -> sec
     export function getSecondsFromArt1Scale(lScale: number) {
         if (lScale === -0x80000000) {
             return 0;
@@ -33,6 +13,7 @@ export namespace Synthesizer {
         return 2 ** (lScale / 1200 / 65536);
     }
 
+    // artInfoのpitch Cents -> Hz
     function getFrequencyFromArt1CentScale(lScale: number) {
         return 440 * (2 ** ((lScale / 65536 - 6900)/1200));
     }
@@ -324,7 +305,7 @@ export namespace Synthesizer {
         // channel ID -> tick -> pitchBend Info (number)
         const tickPitchBendMap = new Map<number, Map<number, number>>();
 
-        // Truckを見てChannel -> tick -> 各種データを集める
+        // 1. Truckを見てChannel -> tick -> 各種データを集める
         let maxTick = 0;
         midi.mtrks.forEach(mtrk => {
             let tick = 0;
@@ -425,7 +406,7 @@ export namespace Synthesizer {
                 } else if (mtrkEvent.event instanceof MIDI.MetaEvent) {
                     if (mtrkEvent.event.metaEventType === 0x51) {
                         // tempo event
-                        const tempo = getBigEndianNumberFromUint8Array(mtrkEvent.event.value, 0, mtrkEvent.event.value.length);
+                        const tempo = Util.getBigEndianNumberFromUint8Array(mtrkEvent.event.value, 0, mtrkEvent.event.value.length);
                         tickTempoMap.set(tick, tempo);
                     }
                 } else {
@@ -440,6 +421,8 @@ export namespace Synthesizer {
         tickNotesMap.forEach((_, channelID) => channelIDs.add(channelID));
 
         const notePerTick = midi.mthd.division; // ticks per 1/4 note (ex. 480)
+
+        // 2. tick -> 各種情報を wave offset -> 各種情報に変換する
 
         // tick(number) -> offset(number)
         const tickToOffset = new Map<number, number>();
@@ -499,6 +482,8 @@ export namespace Synthesizer {
                 offsetPitchBendMap.get(channelID).set(offset, pitchBendInfo);
             });
         });
+
+        // 3. 各チャンネルごとに全オフセット見て回り、 Wave用PCM作成(ここの割合が一番大きい)
         
         // channelID -> [waveDataR(Int16Array), waveDataL(Int16Array)]
         const channelWaveDatas = new Map<number, [Array<number>, Array<number>]>();
@@ -611,8 +596,8 @@ export namespace Synthesizer {
                             let waveLooping = false;
                             let freqRate = 1;
                             if (wsmp) {
-                                baseFrequency = getFrequencyFromNoteID(wsmp.usUnityNote);
-                                const altFreq = getFrequencyFromNoteID(noteID);
+                                baseFrequency = Util.getFrequencyFromNoteID(wsmp.usUnityNote);
+                                const altFreq = Util.getFrequencyFromNoteID(noteID);
                                 freqRate = altFreq / baseFrequency;
                                 if (wsmp.waveSampleLoop) {
                                     waveLooping = true;
@@ -909,8 +894,8 @@ export namespace Synthesizer {
             riffData[subOffset+3] = (!waveDataL[i]) ? 0 : ((waveDataL[i] >> 8) & 0xFF);
         }
         const ret = new Uint8Array(riffData);
-        setLittleEndianNumberToUint8Array(ret, 4, 4, waveDataR.length * 4 + 44);
-        setLittleEndianNumberToUint8Array(ret, 40, 4, waveDataR.length * 4);
+        Util.setLittleEndianNumberToUint8Array(ret, 4, 4, waveDataR.length * 4 + 44);
+        Util.setLittleEndianNumberToUint8Array(ret, 40, 4, waveDataR.length * 4);
 
         const channelRiffDatas = new Map<number, Uint8Array>();
         channelIDs.forEach(channelID => {
@@ -936,8 +921,8 @@ export namespace Synthesizer {
                 riffData[subOffset+3] = (!waveDataL[i]) ? 0 : ((waveDataL[i] >> 8) & 0xFF);
             }
             const channelRiffData = new Uint8Array(riffData);
-            setLittleEndianNumberToUint8Array(channelRiffData, 4, 4, waveDataR.length * 4 + 44);
-            setLittleEndianNumberToUint8Array(channelRiffData, 40, 4, waveDataR.length * 4);
+            Util.setLittleEndianNumberToUint8Array(channelRiffData, 4, 4, waveDataR.length * 4 + 44);
+            Util.setLittleEndianNumberToUint8Array(channelRiffData, 40, 4, waveDataR.length * 4);
             channelRiffDatas.set(channelID, channelRiffData);
         });
 

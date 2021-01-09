@@ -17,26 +17,6 @@ export class ParseResult {
     }
 };
 
-export function getFrequencyFromNoteID(noteID : number) {
-    const table = [
-        440,
-        466.16376152,
-        493.88330126,
-        523.2511306,
-        554.36526195,
-        587.32953583,
-        622.25396744,
-        659.25511383,
-        698.45646287,
-        739.98884542,
-        783.99087196,
-        830.60939516,
-    ];
-    const offset = (noteID + 3) % 12;
-    const size = 2 ** Math.floor((noteID -69) / 12);
-    return table[offset] * size;
-}
-
 function getWaveChunkFromPtbl(tableIndex : number, ptblChunk : DLS.PtblChunk, waves : Array<DLS.WaveChunk>) : DLS.WaveChunk {
     const minOffset = Math.min(...waves.map((waveChunk) => waveChunk.offset));
     const waveOffsetDelta = ptblChunk.poolCues[tableIndex];
