@@ -200,6 +200,12 @@ export namespace DLS {
         CONN_SRC_CC11          : 0x008B,  // Expression
     };
 
+    export const ART1CONTROL = {
+        CONN_CTRL_NONE         : 0x0000,
+        CONN_CTRL_CC1          : 0x0081,
+        CONN_CTRL_RPN0         : 0x0100,
+    }
+
     export const ART1DESTINATION = {
         CONN_DST_NONE     : 0x0000,
         CONN_DST_GAIN     : 0x0001,
@@ -224,11 +230,12 @@ export namespace DLS {
     }
 
     export type Art1Source = typeof ART1SOURCE[keyof typeof ART1SOURCE];
+    export type Art1Control = typeof ART1CONTROL[keyof typeof ART1CONTROL];
     export type Art1Destination = typeof ART1DESTINATION[keyof typeof ART1DESTINATION];
 
     export class Art1ConnectionBlock {
         usSource      : Art1Source;
-        usControl     : number;
+        usControl     : Art1Control;
         usDestination : Art1Destination;
         usTransform   : number;
         lScale        : number;

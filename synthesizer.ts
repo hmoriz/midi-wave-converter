@@ -178,8 +178,12 @@ export namespace Synthesizer {
                     case DLS.ART1DESTINATION.CONN_DST_PITCH:
                         if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_LFO) {
                             // LFO -> Pitch
-                            ret.LFOToPitch = Math.max(-1200, Math.min(1200, cb.lScale / 655360.0));
-                            return;
+                            if (cb.usControl === DLS.ART1CONTROL.CONN_CTRL_NONE) {
+                                ret.LFOToPitch = Math.max(-1200, Math.min(1200, cb.lScale / 65536.0));
+                                return;
+                            } else if (cb.usControl === DLS.ART1CONTROL.CONN_CTRL_CC1) {
+                                ret.PitchPerModWheel = Math.max(-1200, Math.min(1200, cb.lScale / 65536.0));
+                            }
                         }
                         if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_KEYNUMBER) {
                             ret.KeyNumberToPitch = Math.max(-1200, Math.min(1200, cb.lScale / 655360.0));
@@ -222,6 +226,7 @@ export namespace Synthesizer {
         volume       : number = 100;
         expression   : number = 127;
         pan          : number = undefined;
+        modWheel     : number = 0;
 
         rpnLSB         : number = 127;
         rpnMSB         : number = 127;
@@ -361,6 +366,9 @@ export namespace Synthesizer {
                                 // MSB
                                 channelInfo.bankID = channelInfo.bankID & 0x00FF + (mtrkEvent.event.value1 << 8);
                             }
+                        } else if (mtrkEvent.event.controlCommand === 0x01) {
+                            // Modulation wheel
+                            channelInfo.modWheel = mtrkEvent.event.value1;
                         } else if (mtrkEvent.event.controlCommand === 0x07) {
                             // Volume
                             channelInfo.volume = mtrkEvent.event.value1;
@@ -656,11 +664,13 @@ export namespace Synthesizer {
                                 }
                                 // LFO情報もpositionDXに適用 (cent単位)
                                 let lfo = 0;
-                                if (art1Info.LFOToPitch) {
+                                if (art1Info.LFOToPitch !== 0 || art1Info.PitchPerModWheel !== 0) {
                                     // 遅延が存在する場合は遅延時間以降でサインカーブを生成
+                                    // また, -50～50(DLSに設定が存在する場合は別)centでmodulationWheelを適用
                                     if (sec >= art1Info.LFODelay) {
-                                        lfo = Math.sin((sec - art1Info.LFODelay) * Math.PI * 2 * art1Info.LFOFrequency) * art1Info.LFOToPitch;
+                                        lfo = Math.sin((sec - art1Info.LFODelay) * Math.PI * 2 * art1Info.LFOFrequency) * (art1Info.LFOToPitch + (art1Info.PitchPerModWheel || 50) * (channelInfo.modWheel / 128));
                                     }
+                                    //if (channelInfo.modWheel > 0) console.log(channelID, offset, sec, art1Info.LFODelay, channelInfo.modWheel, lfo, art1Info.LFOToPitch, art1Info.PitchPerModWheel);
                                 }
                                 sampleOffsetSpeedCents += lfo;
                                 if (wsmp) {
@@ -831,7 +841,7 @@ export namespace Synthesizer {
                             // PAN考慮
                             let panAttenuationR = 0;
                             let panAttenuationL = 0;
-                            if (channelInfo.pan) {
+                            if (channelInfo.pan !== undefined) {
                                 const pan = channelInfo.pan;
                                 panAttenuationR = -Math.min(96, 20 * Math.log10(Math.sin(Math.PI / 2 * pan / 127)));
                                 panAttenuationL = -Math.min(96, 20 * Math.log10(Math.cos(Math.PI / 2 * pan / 127)));
