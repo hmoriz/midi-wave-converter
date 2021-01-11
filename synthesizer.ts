@@ -223,11 +223,12 @@ export namespace Synthesizer {
     }
 
     class NoteInfo {
-        noteID : number;
-        velocity : number;
+        noteID    : number;
+        velocity  : number;
         endTick   : number;
         endOffset : number;
-        length : number;
+        length    : number;
+        notEnds   : boolean;  // 次のノートが開始されるまでオフが呼ばれなかったノートに対するフラグ
     }
 
     // チャンネルの楽器その他の情報
@@ -350,6 +351,7 @@ export namespace Synthesizer {
                                     // 前回のONイベントがOFFにならずに残っているので一つ前のtickでオフにさせる
                                     const noteInfo = tickNotesMap.get(mtrkEvent.event.channel).get(lastTick).find(nInfo => noteID === nInfo.noteID);
                                     noteInfo.endTick = tick -1;
+                                    noteInfo.notEnds = true;
                                 }
                             }
                             // 前回のONイベント更新(NoteID別)
@@ -590,13 +592,13 @@ export namespace Synthesizer {
         // channelID -> [waveDataR(Int16Array), waveDataL(Int16Array)]
         const channelWaveDatas = new Map<number, [Array<number>, Array<number>]>();
 
-        // channelID -> noteID -> [attacked offset, valocity, sample_offset_speed_gain, last_sample_offset]
-        const noteIDAttackedOffsetMap = new Map<number, Map<number, [number, NoteInfo, number, number]>>();
+        // channelID -> Array[attacked offset, valocity, sample_offset_speed_gain, last_sample_offset]
+        const channelIDAttackingNoteMap = new Map<number, Array<[number, NoteInfo, number, number]>>();
         // channelID -> [ChannelInfo, wave, art1Info(for ins), lart(for ins)]
         const channelInfoMap = new Map<number, [ChannelInfo, InstrumentData, Art1Info, DLS.LartChunk]>();
         channelIDs.forEach(channelID => {
+            channelIDAttackingNoteMap.set(channelID, new Array());
             channelWaveDatas.set(channelID, [new Array(), new Array()]);
-            noteIDAttackedOffsetMap.set(channelID, new Map<number, [number, NoteInfo, number, number]>());
         });
         // channelID -> pitchBend(number)
         const pitchBendMap = new Map<number, number>();
@@ -619,7 +621,7 @@ export namespace Synthesizer {
                 const channelEvent = offsetChannelInfoMap.get(channelID)?.get(offset);
                 if (channelEvent) {
                     /** @ts-ignore  */
-                    const channelInfoData = dls.instrumentIDMap.get(channelEvent.instrumentID).get(channelID === 9 ? 2147483648 : channelEvent.bankID);
+                    const channelInfoData = dls.instrumentIDMap.get(channelEvent.instrumentID)?.get(channelID === 9 ? 2147483648 : channelEvent.bankID);
                     let art1Info : Art1Info;
                     if (channelInfoData.insChunk.lart && lartOffsetToArt1InfoMap.has(channelInfoData.insChunk.lart.offset)) {
                         art1Info = lartOffsetToArt1InfoMap.get(channelInfoData.insChunk.lart.offset);
@@ -632,7 +634,7 @@ export namespace Synthesizer {
                 const noteEvents = offsetNotesMap.get(channelID)?.get(offset);
                 if (noteEvents) {
                     noteEvents.forEach(noteEvent => {
-                        noteIDAttackedOffsetMap.get(channelID).set(noteEvent.noteID, [offset, noteEvent, 0, 0]);
+                        channelIDAttackingNoteMap.get(channelID).push([offset, noteEvent, 0, 0]);
                     })
                 }
                 const pitchBendEventMap = offsetPitchBendMap.get(channelID);
@@ -640,8 +642,10 @@ export namespace Synthesizer {
                     const pitchBendEvent =  pitchBendEventMap.get(offset);
                     pitchBendMap.set(channelID, pitchBendEvent);
                 }
-                const attackedMap = noteIDAttackedOffsetMap.get(channelID);
-                if (attackedMap) {
+
+                // 現在Onになっているノートに対してサンプルを収集しwaveDataに格納してく
+                let attackingNotes = channelIDAttackingNoteMap.get(channelID);
+                if (attackingNotes.length >= 1) {
                     const channelData = channelInfoMap.get(channelID);
                     let channelInfo : ChannelInfo;
                     let instrumentData : InstrumentData;
@@ -650,8 +654,11 @@ export namespace Synthesizer {
                     if (channelData) {
                         [channelInfo, instrumentData, art1Info, lart] = channelInfoMap.get(channelID);
                     }
-                    attackedMap?.forEach(([attackedOffset, noteInfo, sampleOffsetSpeedGain, lastSampleOffset], noteID) => {
+                    attackingNotes.forEach((attackingNoteData, arrayIndex) => {
                         if (!channelData) return;
+                        if (!attackingNoteData) return;
+                        const [attackedOffset, noteInfo, sampleOffsetSpeedGain, lastSampleOffset] = attackingNoteData;
+                        const noteID = noteInfo.noteID;
                         const position = offset - attackedOffset;
                         const positionFromReleased = offset - noteInfo.endOffset;
                         const sec = position / 44100;
@@ -665,28 +672,32 @@ export namespace Synthesizer {
                         if (!rgn) {
                             // rgnが存在しないなどないはず
                             console.error("not defined RGN", noteID, noteInfo.velocity, instrumentData.insChunk.lrgn.rgnList);
-                            noteIDAttackedOffsetMap.get(channelID).delete(noteID);
+                            attackingNotes[arrayIndex] = null;
                             return;
                         }
                         if (!lart && rgn.lart) {
-                            // lartが存在しない -> regionごとのlartのほうを取得(with cache)
+                            // ins直属のlartが存在しない -> regionごとのlartのほうを取得(with cache)
                             if (lartOffsetToArt1InfoMap.has(rgn.lart.offset)) {
                                 art1Info = lartOffsetToArt1InfoMap.get(rgn.lart.offset);
                             } else {
                                 art1Info = getArt1InfoFromLarts(rgn.lart);
                                 lartOffsetToArt1InfoMap.set(rgn.lart.offset, art1Info);
-                                console.log(lartOffsetToArt1InfoMap);
                             }
                         } else if (!lart && !rgn.lart) {
+                            // TODO: 一応このケースも想定する必要あり(gm.dlsにはない)
                             console.error("no ins lart nor rgn lart", channelInfo.instrumentID, rgn);
+                            return;
                         }
                         if (secFromReleased >= art1Info.EG1ReleaseTime) {
-                            noteIDAttackedOffsetMap.get(channelID).delete(noteID);
+                            // ノートオフ かつリリース時間を超えているので配列から雑に削除
+                            attackingNotes[arrayIndex] = null;
+                            return;
                         } else {
                             const waveChunk = instrumentData.waves.get(rgn.wlnk.ulTableIndex);
                             if (!waveChunk) {
+                                // 音源が不在(普通はないはず)
                                 console.error("cannot load waveInfo from ", rgn);
-                                noteIDAttackedOffsetMap.get(channelID).delete(noteID);
+                                attackingNotes[arrayIndex] = null;
                                 return;
                             }
                             const bps = waveChunk.bytesPerSecond;
@@ -714,7 +725,7 @@ export namespace Synthesizer {
                             }
                             // EG2(Envelope Generator for Pitch)情報をpositionDXに雑に適用
                             let nextSampleOffsetSpeedGain = sampleOffsetSpeedGain;
-                            if (art1Info) {
+                            if (position >= 1 && art1Info) {
                                 let sampleOffsetSpeedCents = 0;
                                 let eg2PitchCents = 0;
                                 if (art1Info.EG2ToPitch !== 0) {
@@ -812,8 +823,9 @@ export namespace Synthesizer {
                                 nextSampleOffsetSpeedGain = (2 ** (sampleOffsetSpeedCents / 1200));
                                 // if (sec > 2.0) console.log(offset, channelID, position, sec, pitchBendMap.get(channelID), lastSampleOffset, sampleOffsetSpeedGain, nextSampleOffsetSpeedGain, sampleOffsetSpeedCents, sampleOffsetDefaultSpeed, freqRate, wsmp?.sFineTune, lfoPitchCents, eg2PitchCents, art1Info);
                             }
-                            let sampleOffset = Math.max(0, lastSampleOffset + sampleOffsetDefaultSpeed * freqRate * nextSampleOffsetSpeedGain);
-                            noteIDAttackedOffsetMap.get(channelID).set(noteID, [attackedOffset, noteInfo, nextSampleOffsetSpeedGain, sampleOffset]);
+                            // サンプル側の取得するべきオフセットを取得(ピッチによる変動を考慮済み)
+                            let sampleOffset = Math.max(0, (lastSampleOffset + sampleOffsetDefaultSpeed * freqRate * nextSampleOffsetSpeedGain));
+                            channelIDAttackingNoteMap.get(channelID)[arrayIndex] = [attackedOffset, noteInfo, nextSampleOffsetSpeedGain, sampleOffset];
                             
                             // サンプルwaveのループ部分
                             if (waveLooping && sampleOffset >= (waveLoopStart + waveLoopLength)) {
@@ -823,7 +835,7 @@ export namespace Synthesizer {
                                     // NOTE ONのうちにワンショット系の時間が過ぎているので一応警告
                                     // console.warn("sampleOffset is out of BOUND", sampleOffset );
                                 // }
-                                noteIDAttackedOffsetMap.get(channelID).delete(noteID);
+                                attackingNotes[arrayIndex] = null;
                                 return;
                             }
                             // TODO : 一旦「線形補間」
@@ -901,6 +913,10 @@ export namespace Synthesizer {
                                             eg1Attenuation = 96 * secFromReleased / art1Info.EG1ReleaseTime;
                                         }
                                     }
+                                    if (noteInfo.notEnds) {
+                                        // 次のノートが迫っているパターンのため, Attenuationを加速させる
+                                        eg1Attenuation *= 2;
+                                    }
                                     eg1Attenuation = Math.max(eg1Attenuation, dAttenuation);
                                 }
                                 eg1Attenuation = Math.min(96, Math.max(0, eg1Attenuation));
@@ -964,9 +980,16 @@ export namespace Synthesizer {
                             channelWaveDatas.get(channelID)[0][offset] += sampleWaveDataR;
                             channelWaveDatas.get(channelID)[1][offset] += sampleWaveDataL;
                             // console.log(offset, attackedOffset, noteInfo, positionDX, art1Info, wsmp, position, sampleOffset, freqRate, sampleWaveData, eg1Velocity, waveLoopLength, waveLoopStart, waveInfo.wave.pcmData.length);
+                            if (sec >= 1 && eg1Attenuation + velocityAttenuation + wsmpAttenuation + lfoAttenuation + volumeAttenuation + expressionAttenuation >= 96) {
+                                // なり始めてから時間がそれなりに経ち音量が下がりきってる -> 配列から除去(計算の対象外とする)
+                                attackingNotes[arrayIndex] = null;
+                            }
                         }
                     });
                 }
+                // 消えたデータを除去
+                channelIDAttackingNoteMap.set(channelID, attackingNotes.filter(data => !!data));
+
                 if (!channelWaveDataMaxMin.get(channelID)) {
                     channelWaveDataMaxMin.set(channelID, [channelWaveDatas.get(channelID)[0][offset] || 1, channelWaveDatas.get(channelID)[0][offset] || -1]);
                 } else {
