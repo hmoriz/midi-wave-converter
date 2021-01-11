@@ -1,5 +1,5 @@
 # midi-wave-converter
-https://hmoriz.github.io/midi-wave-converter  
+https://hmoriz.github.io/midi-wave-converter/release  
 ブラウザ上でシンセサイズしてMIDIをwaveに変換させるwebツール(Parcelを使ってます)  
 ブラウザ上で再生することができなくなってしまったMIDIの音を、 ゲイツシンセとも言われている Microsoft GS Wavetable SW Synth をできるだけ再現しながらwaveとして再生可能なものにします。
 現時点では進行中のフレーム回しみたいな対応をやってない都合でパッと見フリーズを起こすので、 デベロッパーコンソールを開いて動作させることを強く推奨します(ただし、 ゴミログがめちゃくちゃ多い点に注意)
