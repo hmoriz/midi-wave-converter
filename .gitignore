@@ -1,5 +1,5 @@
 .cache
 node_modules
-
+dist
 gm.dls
 mid
