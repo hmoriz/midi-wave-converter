@@ -1,3 +1,4 @@
+import { DFT } from "./dft";
 import { ParseResult } from "./dls";
 import { Synthesizer } from "./synthesizer";
 import { Util } from "./util";
@@ -6,6 +7,8 @@ import { Util } from "./util";
 export namespace Sample {
     // 雑にサンプル作成
     export function makeWaveSamples(dlsInfo : ParseResult) {
+        const samplingDIV = document.getElementById('sampling')
+        samplingDIV.textContent = "・ 各数値(Bank ID)をクリックすることでwaveサンプルを展開(時間がかかります)";
         const {instrumentIDNameBankMap, instrumentIDMap} = dlsInfo;
         console.log(instrumentIDMap);
         instrumentIDNameBankMap.forEach((inamBankIDDataMap, id) => {
@@ -18,6 +21,9 @@ export namespace Sample {
                     const {insChunk} = data;
                     let lart = insChunk.lart;
                     let art1Info = Synthesizer.getArt1InfoFromLarts(lart);
+                    if (art1Info.EG2SustainLevel !== 0) {
+                        console.error(data.insChunk);
+                    }
                     console.log(id, bankID, insChunk, lart, art1Info, data.waves);
                     const button = document.createElement('button');
                     button.innerText = bankID.toString();
@@ -37,9 +43,8 @@ export namespace Sample {
                                 lart = regionData.lart;
                                 art1Info = Synthesizer.getArt1InfoFromLarts(lart);
                             }
-                            console.log(inam, noteID, regionData, data.insChunk, lart, art1Info);
                             if (!regionData) continue;
-                            const wsmp = regionData.wsmp;
+                            let wsmp = regionData.wsmp;
                             const wlnk = regionData.wlnk;
                             // const lart = regionData.lart;
                             // console.log(inam, lart);
@@ -48,122 +53,138 @@ export namespace Sample {
                                 id: wlnk.ulTableIndex,
                                 wData: data.waves.get(wlnk.ulTableIndex),
                             }
+                            if (!wsmp) {
+                                wsmp = wave.wData.wsmpChunk;
+                            }
+                            if (!wsmp) continue; // ないことはなかったはず
+
                             const span = document.createElement('span');
                             span.style.display = 'inline-block';
                             span.innerText = '・ ' + noteID;
     
                             const audio = document.createElement('audio');
                             if (wsmp) {
+                                const noteOnSec = 10.0; // ノートがオンになっている仮値
+                                const waveSec = 12.0 // wave時間の仮値
+
                                 // 元のデータ
                                 let segment = new Uint8Array(wave.wData.segmentData);
-                                const baseID = wsmp.usUnityNote;
-                                const baseFreq = Util.getFrequencyFromNoteID(baseID);
                                 const baseBitRate = Util.getLittleEndianNumberFromUint8Array(segment, 24, 4);
     
                                 // waveのdata部分を抽出して変更しやすいようにInt16Array生成
-                                const dataSize = Util.getLittleEndianNumberFromUint8Array(segment, 86, 4);
+                                const dataSize = Util.getLittleEndianNumberFromUint8Array(segment, wave.wData.dataOffset - 4, 4);
                                 const blockAlign = Util.getLittleEndianNumberFromUint8Array(segment, 32, 2); // たぶん2 (16bit monoral)
                                 if (blockAlign !== 2) {
                                     throw new Error("Sorry! not implemented for blockAlign " + blockAlign);
                                 }
-                                let waveDataSegment = new Int16Array(dataSize / blockAlign);
-                                for(let i = 0; i < dataSize / blockAlign; i++) {
-                                    let v = Util.getLittleEndianNumberFromUint8Array(segment, 90 + (i * blockAlign), blockAlign);
-                                    if (v > 0x8000) {
-                                        v = -((0x10000 - v) & 0x7FFF);
-                                    }
-                                    if (v === 0x8000) {
-                                        v = -0x8000;
-                                    }
-                                    waveDataSegment.set([v], i);
-                                }
+                                let waveDataSegment = new Int16Array(wave.wData.pcmData);
     
                                 // ループ設定
-                                if (wsmp.cSampleLoops == 1 && wsmp.waveSampleLoop.cbSize > 0) {
-                                    const waveSample = wsmp.waveSampleLoop;
-                                    const loopStart = waveSample.ulLoopStart;
-                                    const loopLength = waveSample.ulLoopLength;
-                                    // 雑に50回 or 合計5秒分くらいループさせた新wave作成 (NOTE: offsetはblockAlignを考慮させる)
-                                    let sec = 5.0;
-                                    if (art1Info) {
-                                        sec = Math.max(sec, art1Info.EG1AttackTime + art1Info.EG1DecayTime, art1Info.EG1AttackTime + art1Info.EG1ReleaseTime);
-                                    }
-                                    const loopCount = Math.min(1000, Math.max(50, Math.round(sec / (loopLength / baseBitRate))));
-                                    const loopBlock = waveDataSegment.slice(loopStart, loopStart + loopLength);
-                                    
-                                    const newWaveDataSegmentSize = (dataSize / blockAlign) + loopLength * (loopCount - 1);
-                                    const newWaveDataSegment = new Int16Array(newWaveDataSegmentSize);
-                                    newWaveDataSegment.set(waveDataSegment, 0);
-                                    for(let i = 1; i < loopCount; i++) {
-                                        newWaveDataSegment.set(loopBlock, dataSize / blockAlign + (i - 1) * loopLength);
-                                    }
-                                    
-                                    waveDataSegment = newWaveDataSegment;
+                                let baseFrequency = 0;
+                                let waveLoopStart = 0;
+                                let waveLoopLength = 0;
+                                let waveLooping = false;
+                                let freqRate = 1;
+                                let loopTime = 0;
+                                let newWaveSegmentSize = waveDataSegment.length;
+                                
+                                let unityNote = wsmp.usUnityNote;
+                                if (id >= 113) {
+                                    // NOTE: どうもそうっぽいので
+                                    unityNote = 60;
                                 }
-    
-                                // Hz改変
+                                baseFrequency = Util.getFrequencyFromNoteID(wsmp.usUnityNote);
                                 const altFreq = Util.getFrequencyFromNoteID(noteID);
-                                const freqRate = altFreq / baseFreq;
-                                let newWaveDataSegment = new Int16Array(waveDataSegment.length);
+                                freqRate = altFreq / baseFrequency;
+                                if (wsmp.waveSampleLoop) {
+                                    waveLooping = true;
+                                    waveLoopStart = wsmp.waveSampleLoop.ulLoopStart;
+                                    waveLoopLength = wsmp.waveSampleLoop.ulLoopLength;
+                                    const baseSec = wave.wData.pcmData.length / wave.wData.bytesPerSecond;
+                                    const loopSec = wsmp.waveSampleLoop.ulLoopLength / wave.wData.bytesPerSecond;
+                                    loopTime = Math.trunc((waveSec - baseSec) / loopSec);
+                                    newWaveSegmentSize = newWaveSegmentSize + (loopTime - 1) * waveLoopLength;
+                                }
+                                
+                                console.log(inam, noteID, baseFrequency, altFreq, freqRate, regionData, data.insChunk, lart, art1Info, loopTime, waveDataSegment.length, waveLoopStart, waveLoopLength, waveLoopStart + waveLoopLength, newWaveSegmentSize);
+    
+                                // 音色改変 (Hz)
+                                let newWaveDataSegment = new Int16Array(newWaveSegmentSize);
                                 let lastX = 0;
                                 let sampleOffsetSpeedGain = 0; // EG2のdxを累積させる用
                                 let minY = -1;
                                 let maxY = 1;
-                                for (let i = 0; i < waveDataSegment.length; i++) {
+                                for (let i = 0; i < newWaveDataSegment.length; i++) {
                                     const sec = i / baseBitRate;
-                                    const noteSec = 2.0; // 仮値
     
                                     // EG2(Envelope Generator for Pitch)情報をxに雑に適用
                                     let nextSampleOffsetSpeedGain = sampleOffsetSpeedGain;
                                     if (art1Info) {
                                         let sampleOffsetSpeedCents = 0;
-                                        if (art1Info.EG2ToPitch > 0) {
-                                            if (art1Info.EG2AttackTime > 0 || art1Info.EG2DecayTime > 0 || art1Info.EG2ReleaseTime > 0) {
-                                                if (sec < art1Info.EG2AttackTime) {
-                                                    // Attack Zone
-                                                    if (sec === 0) {
-                                                        sampleOffsetSpeedCents = 0
-                                                    } else {
-                                                        sampleOffsetSpeedCents = art1Info.EG2ToPitch * sec / art1Info.EG2AttackTime;
-                                                    }
-                                                } else if (sec < noteSec) {
-                                                    // Decay or Sustain Zone
-                                                    if (sec === 0 || art1Info.EG2DecayTime === 0) {
-                                                        sampleOffsetSpeedCents = 0;
-                                                    } else {
-                                                        if (sec === art1Info.EG2AttackTime) {
-                                                            sampleOffsetSpeedCents = art1Info.EG2ToPitch;
-                                                        } else {
-                                                            sampleOffsetSpeedCents = art1Info.EG2ToPitch * (sec - art1Info.EG2AttackTime) / (art1Info.EG2DecayTime);
-                                                        }
-                                                    }
-                                                    sampleOffsetSpeedCents = Math.max(sampleOffsetSpeedCents, art1Info.EG2ToPitch * art1Info.EG2SustainLevel / 100.0);
-                                                } else {
-                                                    // Sustain or Release Zone
-                                                    let dddx = art1Info.EG2ToPitch;
-                                                    if (sec === 0 || art1Info.EG2DecayTime === 0) {
-                                                        dddx = 0;
-                                                    } else {
-                                                        if (sec !== art1Info.EG2AttackTime) {
-                                                            dddx = art1Info.EG2ToPitch * (sec - art1Info.EG2AttackTime) / (art1Info.EG2DecayTime);
-                                                        }
-                                                    }
-                                                    dddx = Math.max(dddx, art1Info.EG2ToPitch * art1Info.EG2SustainLevel / 100.0);
-                                                    if (art1Info.EG2ReleaseTime === 0) {
-                                                        sampleOffsetSpeedCents = 0;
-                                                    } else {
-                                                        if (sec === noteSec) {
-                                                            sampleOffsetSpeedCents = dddx;
-                                                        } else {
-                                                            sampleOffsetSpeedCents = art1Info.EG2ToPitch * (sec - noteSec) / (art1Info.EG2ReleaseTime);
-                                                        }
-                                                    }
-                                                    sampleOffsetSpeedCents = Math.min(sampleOffsetSpeedCents, dddx);
-                                                }
-                                                // ddx : cent単位
-                                                sampleOffsetSpeedCents = Math.max(0, Math.min(art1Info.EG2ToPitch, sampleOffsetSpeedCents));
+                                        if (art1Info.EG2ToPitch !== 0 ) {
+                                            let attackTimeCent = art1Info.EG2AttackTime;
+                                            if (art1Info.EG2VelocityToAttack !== -2147483648) {
+                                                attackTimeCent += art1Info.EG2VelocityToAttack * (100 / 128);
                                             }
+                                            let attackTime = 0;
+                                            if (attackTimeCent !== -2147483648) {
+                                                attackTime = Synthesizer.getSecondsFromArt1Scale(attackTimeCent);
+                                            }
+                                            let decayTimeCent = art1Info.EG2DecayTime;
+                                            if (art1Info.EG2KeyToDecay !== -2147483648) {
+                                                decayTimeCent += art1Info.EG2KeyToDecay * (noteID / 128);
+                                            }
+                                            let decayTime = 0;
+                                            if (decayTimeCent !== -2147483648) {
+                                                decayTime = Synthesizer.getSecondsFromArt1Scale(decayTimeCent);
+                                            }
+                                            if (sec < attackTime) {
+                                                // Attack Zone
+                                                if (sec === 0) {
+                                                    sampleOffsetSpeedCents = 0
+                                                } else {
+                                                    sampleOffsetSpeedCents = art1Info.EG2ToPitch * sec / attackTime;
+                                                }
+                                            } else if (sec < noteOnSec) {
+                                                // Decay or Sustain Zone
+                                                if (sec === 0 || art1Info.EG2DecayTime === 0) {
+                                                    sampleOffsetSpeedCents = 0;
+                                                } else {
+                                                    if (sec === attackTime) {
+                                                        sampleOffsetSpeedCents = art1Info.EG2ToPitch;
+                                                    } else {
+                                                        sampleOffsetSpeedCents = -art1Info.EG2ToPitch * (sec - attackTime) / decayTime + art1Info.EG2ToPitch;
+                                                    }
+                                                }
+                                                sampleOffsetSpeedCents = Math.max(sampleOffsetSpeedCents, art1Info.EG2ToPitch * art1Info.EG2SustainLevel / 100.0);
+                                            } else {
+                                                // Sustain or Release Zone
+                                                let dddx = art1Info.EG2ToPitch;
+                                                if (sec === 0 || art1Info.EG2DecayTime === 0) {
+                                                    dddx = 0;
+                                                } else {
+                                                    if (sec !== attackTime) {
+                                                        dddx = -art1Info.EG2ToPitch * (sec - attackTime) / decayTime + art1Info.EG2ToPitch;
+                                                    }
+                                                }
+                                                dddx = Math.max(dddx, art1Info.EG2ToPitch * art1Info.EG2SustainLevel / 100.0);
+                                                if (art1Info.EG2ReleaseTime === 0) {
+                                                    sampleOffsetSpeedCents = 0;
+                                                } else {
+                                                    if (sec === noteOnSec) {
+                                                        sampleOffsetSpeedCents = dddx;
+                                                    } else {
+                                                        sampleOffsetSpeedCents = -art1Info.EG2ToPitch * (sec - noteOnSec) / art1Info.EG2ReleaseTime + art1Info.EG2ToPitch;
+                                                    }
+                                                }
+                                                // console.log("dddx", dddx, sec-noteOnSec, sampleOffsetSpeedCents);
+                                                sampleOffsetSpeedCents = Math.min(sampleOffsetSpeedCents, dddx);
+                                            }
+                                            // ddx : cent単位
+                                            sampleOffsetSpeedCents = Math.max(-1200, Math.min(1200, art1Info.EG2ToPitch, sampleOffsetSpeedCents));
                                         }
+                                        // console.log(noteID, i, sec, noteOnSec, sampleOffsetSpeedCents, nextSampleOffsetSpeedGain, art1Info.EG2SustainLevel, art1Info.EG2ToPitch );
+
                                         // LFO情報もpositionDXに適用 (cent単位)
                                         let lfo = 0;
                                         if (art1Info.LFOToPitch > 0) {
@@ -191,7 +212,15 @@ export namespace Sample {
                                     let x = lastX + freqRate * nextSampleOffsetSpeedGain;
                                     sampleOffsetSpeedGain = nextSampleOffsetSpeedGain;
                                     lastX = x;
-                                    let y;
+
+                                    // サンプルwaveのループ部分
+                                    if (waveLooping && x >= (waveLoopStart + waveLoopLength)) {
+                                        x = ((x - (waveLoopStart + waveLoopLength)) % waveLoopLength) + waveLoopStart;
+                                    } else if (!waveLooping && x >= wave.wData.pcmData.length-1) {
+                                        continue;
+                                    }
+
+                                    let y : number;
                                     // TODO : 一旦「線形補間」
                                     if (Number.isInteger(x)) {
                                         y = waveDataSegment[x];
@@ -207,31 +236,31 @@ export namespace Sample {
                                     let eg1Attenuation = 96;
                                     if (art1Info) {
                                         let attackTime = 0;
-                                        let attackTimeCent = 0;
-                                        if (art1Info.EG1AttackTime > 0) {
+                                        let attackTimeCent = -2147483648;
+                                        if (art1Info.EG1AttackTime !== -2147483648) {
                                             attackTimeCent = art1Info.EG1AttackTime;
                                         }
-                                        if (art1Info.EG1VelocityToAttack > 0) {
+                                        if (art1Info.EG1VelocityToAttack !== -2147483648) {
                                             attackTimeCent += art1Info.EG1VelocityToAttack * (100 / 128);
                                         }
-                                        if (attackTimeCent > 0) {
+                                        if (attackTimeCent !== -2147483648) {
                                             attackTime = Synthesizer.getSecondsFromArt1Scale(attackTimeCent);
                                         }
                                         let decayTime = 0;
-                                        let decayTimeCent = 0;
-                                        if (art1Info.EG1DecayTime > 0) {
+                                        let decayTimeCent = -2147483648;
+                                        if (art1Info.EG1DecayTime !== -2147483648) {
                                             decayTimeCent = art1Info.EG1DecayTime;
                                         }
-                                        if (art1Info.EG1KeyToDecay > 0) {
+                                        if (art1Info.EG1KeyToDecay !== -2147483648) {
                                             decayTimeCent += art1Info.EG1KeyToDecay * (100 / 128);
                                         }
-                                        if (decayTimeCent > 0) {
+                                        if (decayTimeCent !== -2147483648) {
                                             decayTime = Synthesizer.getSecondsFromArt1Scale(decayTimeCent);
                                         }
                                         if (sec < attackTime) {
                                             // Attack Zone
                                             eg1Attenuation = Math.min(96, sec === 0 ? 96 : 20 * Math.log10(attackTime / sec));
-                                        } else if (sec < noteSec) {
+                                        } else if (sec < noteOnSec) {
                                             // Decay or Sustain Zone
                                             if (sec === 0 || decayTime === 0) {
                                                 eg1Attenuation = 96;
@@ -258,10 +287,10 @@ export namespace Sample {
                                             if (art1Info.EG1ReleaseTime === 0) {
                                                 eg1Attenuation = 96;
                                             } else {
-                                                if (sec === noteSec) {
+                                                if (sec === noteOnSec) {
                                                     eg1Attenuation = dAttenuation;
                                                 } else {
-                                                    eg1Attenuation = 96 * (sec - noteSec) / art1Info.EG1ReleaseTime;
+                                                    eg1Attenuation = 96 * (sec - noteOnSec) / art1Info.EG1ReleaseTime;
                                                 }
                                             }
                                             eg1Attenuation = Math.max(eg1Attenuation, dAttenuation);
@@ -315,9 +344,9 @@ export namespace Sample {
                                 const newWaveSize = segment.length + (newDataSize - dataSize);
                                 const newSegment = new Uint8Array(newWaveSize);
                                 newSegment.set(segment, 0);
-                                newSegment.set(segment.slice(90 + dataSize), 90 + newDataSize);
+                                newSegment.set(segment.slice(wave.wData.dataOffset + dataSize), wave.wData.dataOffset + newDataSize);
                                 Util.setLittleEndianNumberToUint8Array(newSegment, 4, 4, newWaveSize);
-                                Util.setLittleEndianNumberToUint8Array(newSegment, 86, 4, newDataSize);
+                                Util.setLittleEndianNumberToUint8Array(newSegment, wave.wData.dataOffset - 4, 4, newDataSize);
                                 for (let i = 0; i < waveDataSegment.length; i++) {
                                     Util.setLittleEndianNumberToUint8Array(newSegment, 90 + i * 2, 2, waveDataSegment[i]);
                                 }
@@ -348,7 +377,7 @@ export namespace Sample {
                 });
                 pElem.appendChild(cdiv);
             });
-            document.body.appendChild(pElem);
+            samplingDIV.appendChild(pElem);
         });
     }
 }

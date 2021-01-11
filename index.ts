@@ -86,9 +86,6 @@ async function loadDLSFile(e : Event) {
         const parser = new DLSParser();
         const parseResult = await parser.parseFile(file);
         dlsParseResult = parseResult;
-        const {instrumentIDNameBankMap, instrumentIDMap} = parseResult;
-
-        console.log(instrumentIDMap);
 
         // 雑にサンプル作成
         Sample.makeWaveSamples(parseResult);
@@ -97,8 +94,7 @@ async function loadDLSFile(e : Event) {
 
 async function loadMIDIFile(e : Event) : Promise<void> {
     for (let i = 0; i < (e.target as HTMLInputElement).files.length; i++) {
-        /** @type {File} */
-        const file = (e.target as HTMLInputElement).files[i];
+        const file : File = (e.target as HTMLInputElement).files[i];
         const parser = new MIDIParser();
         const parseResult = await parser.parseFile(file);
         console.log(parseResult);
@@ -110,7 +106,7 @@ async function loadMIDIFile(e : Event) : Promise<void> {
         newAudio.controls = true;
 
         const audioDiv = document.createElement("div");
-        audioDiv.innerText = `${file.name} => WAVE : `;
+        audioDiv.innerText = `Result\n${file.name} => WAVE : `;
         audioDiv.appendChild(newAudio);
 
         const audioArea = document.getElementById("audioarea");
@@ -149,7 +145,7 @@ async function loadMIDIFile(e : Event) : Promise<void> {
 
 function main() {
     const div1 = document.createElement('div');
-    div1.innerText = 'gm.dls    ';
+    div1.innerText = '1. select "gm.dls"    ';
     const input = document.createElement('input');
     input.type = 'file';
     input.placeholder = 'gm.dls';
@@ -159,7 +155,7 @@ function main() {
     document.getElementById('inputarea').appendChild(div1);
 
     const div2 = document.createElement('div');
-    div2.innerText = 'any midi file (*.mid)    ';
+    div2.innerText = '2. any midi file (*.mid) (loading will take VERY long time)   ';
     const input2 = document.createElement('input');
     input2.type = 'file';
     input2.accept = 'mid';
@@ -171,7 +167,7 @@ function main() {
     canvas.width = 1080;
     canvas.height = 720;
     canvas.style.display = 'none';
-    document.body.appendChild(canvas);
+    document.getElementById('chart').appendChild(canvas);
 }
 
 window.addEventListener('DOMContentLoaded', main);

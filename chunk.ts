@@ -36,10 +36,6 @@ export namespace DLS {
         }
     }
 
-    export class DLSChunk extends Chunk {
-        lins: LinsChunk;
-    }
-
     export class LinsChunk extends ListChunk {
         insList: Array<InsChunk>;
 
@@ -282,6 +278,7 @@ export namespace DLS {
 
     export class WaveChunk extends Chunk {
         rawData         : ArrayBuffer;
+        dataOffset      : number;
         bytesPerSecond  : number;
         segmentData     : Uint8Array;
         pcmData         : Int16Array;

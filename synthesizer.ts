@@ -27,12 +27,13 @@ export namespace Synthesizer {
         EG1VelocityToAttack : number = -2147483648; // cent単位
         EG1KeyToDecay       : number = -2147483648; // cent単位
     
-        EG2AttackTime   : number = 0; // cent -> secに変換
-        EG2DecayTime    : number = 0; // 今のところcent -> secに変換
-        EG2ReservedTime : number = 0; // cent -> sec
-        EG2ReleaseTime  : number = 0; // cent -> sec
-        EG2SustainLevel : number = 100.0; // %単位 (0-100)
-        EG2KeyToDecay   : number = 0; //
+        EG2AttackTime       : number = -2147483648; // cent単位
+        EG2DecayTime        : number = -2147483648; // cent単位
+        EG2ReservedTime     : number = 0; // cent -> sec
+        EG2ReleaseTime      : number = 0; // cent -> sec
+        EG2SustainLevel     : number = 0.0; // %単位 (0-100)
+        EG2VelocityToAttack : number = -2147483648; // cent単位
+        EG2KeyToDecay       : number = -2147483648; // cent単位
 
         LFOFrequency : number = 5.0;
         LFOToVolume  : number = 0;
@@ -43,7 +44,7 @@ export namespace Synthesizer {
 
         Pan : number = 0;
         
-        KeyNumberToPitch : number = 0;
+        KeyNumberToPitch : number = -2147483648;
 
         PitchPerModWheel : number = 0;
     }
@@ -53,7 +54,7 @@ export namespace Synthesizer {
         if (!lart || !lart.art1List) return ret;
         const art1s = lart.art1List;
         art1s.forEach(art1 => {
-            // NOTE : EG2の各種値はlScaleを10分の1にしているが根拠は"勘"以外特にない
+            // NOTE : 一部値はlScaleを10分の1にしているが根拠は"勘"以外特にない
             art1.connectionBlocks.forEach(cb => {
                 switch (cb.usDestination) {
                     case DLS.ART1DESTINATION.CONN_LFO_FREQUENCY:
@@ -121,17 +122,21 @@ export namespace Synthesizer {
                         break;
                     case DLS.ART1DESTINATION.CONN_EG2_ATTACK:
                         if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_NONE) {
-                            ret.EG2AttackTime = getSecondsFromArt1Scale(cb.lScale / 10);
+                            ret.EG2AttackTime = cb.lScale;
                             return;
+                        }
+                        if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_KEYONVELOCITY) {
+                            ret.EG2VelocityToAttack = cb.lScale;
+                            console.error("EG2VelocityToAttack", cb.lScale, ret.EG1AttackTime);
                         }
                         break;
                     case DLS.ART1DESTINATION.CONN_EG2_DECAY:
                         if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_NONE) {
-                            ret.EG2DecayTime = getSecondsFromArt1Scale(cb.lScale / 10);
+                            ret.EG2DecayTime = cb.lScale;
                             return;
                         }
                         if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_KEYNUMBER) {
-                            ret.EG2KeyToDecay = getSecondsFromArt1Scale(cb.lScale / 10);
+                            ret.EG2KeyToDecay = cb.lScale;
                             return;
                         }
                         break;
@@ -139,21 +144,22 @@ export namespace Synthesizer {
                         if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_NONE) {
                             // NOTE : おそらくここで定義されているのがSUSTAIN_LEVEL
                             ret.EG2SustainLevel = Math.max(0, Math.min(100.0, cb.lScale / 10));
+                            console.warn('CONN_EG2_SUSTAIN_RESERVED', lart.offset, cb.lScale, getSecondsFromArt1Scale(cb.lScale), getSecondsFromArt1Scale(cb.lScale/10));
                             return;
                         }
                         break;
                     case DLS.ART1DESTINATION.CONN_EG2_RELEASE:
                         if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_NONE) {
-                            ret.EG2ReleaseTime = getSecondsFromArt1Scale(cb.lScale / 10);
+                            ret.EG2ReleaseTime = getSecondsFromArt1Scale(cb.lScale);
                             return;
                         }
                         break;
                     case DLS.ART1DESTINATION.CONN_EG2_SUSTAIN:
                         if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_NONE) {
                             ret.EG2ReservedTime = getSecondsFromArt1Scale(cb.lScale);
-                            console.warn('CONN_EG2_SUSTAIN', lart.offset, cb.lScale, getSecondsFromArt1Scale(cb.lScale));
+                            console.warn('CONN_EG2_SUSTAIN_?', lart.offset, cb.lScale, getSecondsFromArt1Scale(cb.lScale), getSecondsFromArt1Scale(cb.lScale/10));
                             if (cb.lScale !== 0) {
-                                console.error ("CONN_EG2_SUSTAIN", lart.offset, cb.lScale, cb.lScale / 65536, getSecondsFromArt1Scale(cb.lScale));
+                                console.error ("CONN_EG2_SUSTAIN_?", lart.offset, cb.lScale, cb.lScale / 65536, getSecondsFromArt1Scale(cb.lScale), getSecondsFromArt1Scale(cb.lScale/10));
                             }
                             return;
                         }
@@ -183,16 +189,18 @@ export namespace Synthesizer {
                                 return;
                             } else if (cb.usControl === DLS.ART1CONTROL.CONN_CTRL_CC1) {
                                 ret.PitchPerModWheel = Math.max(-1200, Math.min(1200, cb.lScale / 65536.0));
+                                return;
                             }
                         }
                         if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_KEYNUMBER) {
-                            ret.KeyNumberToPitch = Math.max(-1200, Math.min(1200, cb.lScale / 655360.0));
-                            console.error("KeyNumberToPitch", cb.lScale); // DLS仕様書にはあるがgm.dlsにはなさそう
+                            // NOTE: DLS仕様書にはあるがgm.dlsにはなさそう
+                            ret.KeyNumberToPitch = Math.max(-1200, Math.min(1200, cb.lScale / 65536.0 / 10));
+                            console.error("KeyNumberToPitch", lart.offset, cb.lScale);
                             return;
                         }
                         if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_EG2) {
                             // EG2 Value to Pitch (max pitch delta)
-                            ret.EG2ToPitch = Math.max(-1200, Math.min(1200, cb.lScale / 655360.0));
+                            ret.EG2ToPitch = Math.max(-1200, Math.min(1200, cb.lScale / 65536.0 / 10));
                             console.log("EG2ToPitch", cb.lScale, cb.lScale / 65536, getSecondsFromArt1Scale(cb.lScale), ret.EG2ToPitch);
                             return;
                         }
@@ -208,6 +216,9 @@ export namespace Synthesizer {
                 console.warn('Unknown ART1 Destination', cb);
             })
         })
+        if (ret.EG2SustainLevel !== 0) {
+            console.error(ret.EG2SustainLevel, ret.EG2ReservedTime, ret.EG2ReleaseTime,ret, lart);
+        }
         return ret;
     }
 
@@ -327,28 +338,34 @@ export namespace Synthesizer {
                             const noteInfo = new NoteInfo();
                             noteInfo.noteID = noteID;
                             noteInfo.velocity = mtrkEvent.event.velocity;
-                            if(!tickNotesMap.get(mtrkEvent.event.channel))tickNotesMap.set(mtrkEvent.event.channel, new Map());
-                            if(!tickNotesMap.get(mtrkEvent.event.channel).get(tick)) {
+                            if(!tickNotesMap.has(mtrkEvent.event.channel))tickNotesMap.set(mtrkEvent.event.channel, new Map());
+                            if(!tickNotesMap.get(mtrkEvent.event.channel).has(tick)) {
                                 tickNotesMap.get(mtrkEvent.event.channel).set(tick, new Array());
                             }
                             tickNotesMap.get(mtrkEvent.event.channel).get(tick).push(noteInfo);
-                            if(!channelToNoteLastTick.get(mtrkEvent.event.channel))channelToNoteLastTick.set(mtrkEvent.event.channel, new Map());
-                            if (channelToNoteLastTick.get(mtrkEvent.event.channel).get(noteInfo.noteID) >= 0) {
-                                // 前回のONイベントがOFFにならずに残っているので一つ前のtickでオフにさせる
+                            if(!channelToNoteLastTick.has(mtrkEvent.event.channel))channelToNoteLastTick.set(mtrkEvent.event.channel, new Map());
+                            if (channelToNoteLastTick.get(mtrkEvent.event.channel).has(noteInfo.noteID)) {
                                 const lastTick = channelToNoteLastTick.get(mtrkEvent.event.channel).get(noteID);
-                                const noteInfo = tickNotesMap.get(mtrkEvent.event.channel).get(lastTick).find(nInfo => noteID === nInfo.noteID);
-                                noteInfo.endTick = tick -1;
+                                if (lastTick >= 0) {
+                                    // 前回のONイベントがOFFにならずに残っているので一つ前のtickでオフにさせる
+                                    const noteInfo = tickNotesMap.get(mtrkEvent.event.channel).get(lastTick).find(nInfo => noteID === nInfo.noteID);
+                                    noteInfo.endTick = tick -1;
+                                }
                             }
                             // 前回のONイベント更新(NoteID別)
                             channelToNoteLastTick.get(mtrkEvent.event.channel).set(noteInfo.noteID, tick);
                         } else {
                             // NOTE OFF
                             const noteID = mtrkEvent.event.noteID;
-                            const lastTick = channelToNoteLastTick.get(mtrkEvent.event.channel).get(noteID);
-                            if (lastTick >= 0) {
-                                const noteInfo = tickNotesMap.get(mtrkEvent.event.channel).get(lastTick).find(nInfo => noteID === nInfo.noteID);
-                                noteInfo.endTick = tick;
-                                channelToNoteLastTick.get(mtrkEvent.event.channel).set(noteID, -1);
+                            if (channelToNoteLastTick.has(mtrkEvent.event.channel)) {
+                                if (channelToNoteLastTick.get(mtrkEvent.event.channel).has(noteID)) {
+                                    const lastTick = channelToNoteLastTick.get(mtrkEvent.event.channel).get(noteID);
+                                    if (lastTick >= 0) {
+                                        const noteInfo = tickNotesMap.get(mtrkEvent.event.channel).get(lastTick).find(nInfo => noteID === nInfo.noteID);
+                                        noteInfo.endTick = tick;
+                                        channelToNoteLastTick.get(mtrkEvent.event.channel).set(noteID, -1);
+                                    }
+                                }
                             }
                         }
                     } else if (mtrkEvent.event.isControlEvent) {
@@ -369,19 +386,19 @@ export namespace Synthesizer {
                                 // MSB
                                 channelInfo.bankID = channelInfo.bankID & 0x00FF + (mtrkEvent.event.value1 << 8);
                             }
-                        } else if (mtrkEvent.event.controlCommand === 0x01) {
+                        } else if (mtrkEvent.event.controlCommand === 1) {
                             // Modulation wheel
                             channelInfo.modWheel = mtrkEvent.event.value1;
-                        } else if (mtrkEvent.event.controlCommand === 0x07) {
+                        } else if (mtrkEvent.event.controlCommand === 7) {
                             // Volume
                             channelInfo.volume = mtrkEvent.event.value1;
-                        } else if (mtrkEvent.event.controlCommand === 0x0A) {
+                        } else if (mtrkEvent.event.controlCommand === 10) {
                             // PAN
                             channelInfo.pan = mtrkEvent.event.value1;
-                        } else if (mtrkEvent.event.controlCommand === 0x0B) {
+                        } else if (mtrkEvent.event.controlCommand === 11) {
                             // Expression
                             channelInfo.expression = mtrkEvent.event.value1;
-                        } else if (mtrkEvent.event.controlCommand === 0x06) {
+                        } else if (mtrkEvent.event.controlCommand === 6) {
                             // RPN Data Entry
                             if (channelInfo.usingNrpn) {
                                 // NRPN
@@ -395,7 +412,54 @@ export namespace Synthesizer {
                                     console.warn("not inplemented RPN", mtrkEvent.event.channel, channelInfo.rpnMSB.toString(16), channelInfo.rpnLSB.toString(16));
                                 }
                             }
-                        } else if (mtrkEvent.event.controlCommand == 98) {
+                        } else if (mtrkEvent.event.controlCommand === 71) {
+                            // filter resonance
+                            if (mtrkEvent.event.value1 !== 64) {
+                                console.warn("not implemented about filter!", mtrkEvent.event.value1);
+                            }
+                        } else if (mtrkEvent.event.controlCommand === 72) {
+                            // Release Time
+                            if (mtrkEvent.event.value1 !== 64) {
+                                console.warn("not implemented about time cent!", mtrkEvent.event.value1);
+                            }
+                        } else if (mtrkEvent.event.controlCommand === 73) {
+                            // Attack Time
+                            if (mtrkEvent.event.value1 !== 64) {
+                                console.warn("not implemented about filter!", mtrkEvent.event.value1);
+                            }
+                        } else if (mtrkEvent.event.controlCommand === 75) {
+                            // Release Time
+                            if (mtrkEvent.event.value1 !== 64) {
+                                console.warn("not implemented about time cent!", mtrkEvent.event.value1);
+                            }
+                        } else if (mtrkEvent.event.controlCommand === 74) {
+                            // Brightness
+                            if (mtrkEvent.event.value1 !== 64) {
+                                console.warn("not implemented about time cent!", mtrkEvent.event.value1);
+                            }
+                        } else if (mtrkEvent.event.controlCommand === 91) {
+                            // Reverb
+                            if (mtrkEvent.event.value1 !== 0) {
+                                console.warn("not implemented REVERB", mtrkEvent.event.value1)
+                            }
+                        } else if (mtrkEvent.event.controlCommand === 93) {
+                            // Chorus
+                            if (mtrkEvent.event.value1 !== 0) {
+                                console.warn("not implemented Chorus", mtrkEvent.event.value1)
+                            }
+                        } else if (mtrkEvent.event.controlCommand === 94) {
+                            // Delay(GS) / Variety(XG)
+                            if (midi.usingXG) {
+                                if (mtrkEvent.event.value1 !== 0) {
+                                    console.warn("not implemented Variable Effect", mtrkEvent.event.value1)
+                                }
+                            } else {
+                                if (mtrkEvent.event.value1 !== 0) {
+                                    console.warn("not implemented Delay", mtrkEvent.event.value1)
+                                }
+
+                            }
+                        } else if (mtrkEvent.event.controlCommand === 98) {
                             // NRPN LSB
                             if (!midi.usingXG) {
                                 console.error("This MIDI is not using XG!");
@@ -417,8 +481,8 @@ export namespace Synthesizer {
                             // RPN MSB
                             channelInfo.rpnMSB = mtrkEvent.event.value1;
                             channelInfo.usingNrpn = false;
-                        }else {
-                            console.warn("not implemented Control Command", mtrkEvent.event.channel, mtrkEvent.event.controlCommand.toString(16), mtrkEvent.event);
+                        } else {
+                            console.warn("not implemented Control Command", mtrkEvent.event.channel, mtrkEvent.event.controlCommand, mtrkEvent.event);
                         }
                         if (!tickInstrumentMap.get(mtrkEvent.event.channel)) tickInstrumentMap.set(mtrkEvent.event.channel, new Map());
                         tickInstrumentMap.get(mtrkEvent.event.channel).set(tick, channelInfo);
@@ -551,7 +615,7 @@ export namespace Synthesizer {
             channelIDs.forEach((channelID) => {
                 channelWaveDatas.get(channelID)[0][offset] = 0;
                 channelWaveDatas.get(channelID)[1][offset] = 0;
-                // if (channelID !== 5) return; // 仮置
+                // if (channelID !== 0) return; // 仮置
                 const channelEvent = offsetChannelInfoMap.get(channelID)?.get(offset);
                 if (channelEvent) {
                     /** @ts-ignore  */
@@ -634,7 +698,12 @@ export namespace Synthesizer {
                             let waveLooping = false;
                             let freqRate = 1;
                             if (wsmp) {
-                                baseFrequency = Util.getFrequencyFromNoteID(wsmp.usUnityNote);
+                                let unityNote = wsmp.usUnityNote;
+                                if (channelInfo.instrumentID >= 113) {
+                                    // NOTE: どうもそうっぽいので
+                                    unityNote = 60;
+                                }
+                                baseFrequency = Util.getFrequencyFromNoteID(unityNote);
                                 const altFreq = Util.getFrequencyFromNoteID(noteID);
                                 freqRate = altFreq / baseFrequency;
                                 if (wsmp.waveSampleLoop) {
@@ -647,62 +716,86 @@ export namespace Synthesizer {
                             let nextSampleOffsetSpeedGain = sampleOffsetSpeedGain;
                             if (art1Info) {
                                 let sampleOffsetSpeedCents = 0;
-                                if (art1Info.EG2ToPitch > 0) {
-                                    if (sec < art1Info.EG2AttackTime) {
+                                let eg2PitchCents = 0;
+                                if (art1Info.EG2ToPitch !== 0) {
+                                    let attackTimeCent = art1Info.EG2AttackTime;
+                                    if (art1Info.EG2VelocityToAttack !== -2147483648) {
+                                        attackTimeCent += art1Info.EG2VelocityToAttack * (noteInfo.velocity / 128);
+                                    }
+                                    let attackTime = 0;
+                                    if (attackTimeCent !== -2147483648) {
+                                        attackTime = getSecondsFromArt1Scale(attackTimeCent);
+                                    }
+                                    let decayTimeCent = art1Info.EG2DecayTime;
+                                    if (art1Info.EG2KeyToDecay !== -2147483648) {
+                                        decayTimeCent += art1Info.EG2KeyToDecay * (noteInfo.noteID / 128);
+                                    }
+                                    let decayTime = 0;
+                                    if (decayTimeCent !== -2147483648) {
+                                        decayTime = getSecondsFromArt1Scale(decayTimeCent);
+                                    }
+                                    if (sec < attackTime) {
                                         // Attack Zone
                                         if (sec === 0) {
-                                            sampleOffsetSpeedCents = 0
+                                            eg2PitchCents = 0
                                         } else {
-                                            sampleOffsetSpeedCents = art1Info.EG2ToPitch * sec / art1Info.EG2AttackTime;
+                                            eg2PitchCents = art1Info.EG2ToPitch * sec / attackTime;
                                         }
                                     } else if (positionFromReleased <= 0) {
                                         // Decay or Sustain Zone
                                         if (sec === 0 || art1Info.EG2DecayTime === 0) {
-                                            sampleOffsetSpeedCents = 0;
+                                            eg2PitchCents = 0;
                                         } else {
-                                            if (sec === art1Info.EG2AttackTime) {
-                                                sampleOffsetSpeedCents = art1Info.EG2ToPitch;
+                                            if (sec === attackTime) {
+                                                eg2PitchCents = art1Info.EG2ToPitch;
                                             } else {
-                                                sampleOffsetSpeedCents = art1Info.EG2ToPitch * (sec - art1Info.EG2AttackTime) / (art1Info.EG2DecayTime);
+                                                eg2PitchCents = art1Info.EG2ToPitch - art1Info.EG2ToPitch * Math.min(1, (sec - attackTime) / decayTime);
                                             }
                                         }
-                                        sampleOffsetSpeedCents = Math.max(sampleOffsetSpeedCents, art1Info.EG2ToPitch * art1Info.EG2SustainLevel / 100.0);
+                                        eg2PitchCents = art1Info.EG2ToPitch > 0 ? 
+                                            Math.max(eg2PitchCents, art1Info.EG2ToPitch * art1Info.EG2SustainLevel / 100.0) : 
+                                            Math.min(eg2PitchCents, art1Info.EG2ToPitch * art1Info.EG2SustainLevel / 100.0);
                                     } else {
                                         // Sustain or Release Zone
                                         let dddx = art1Info.EG2ToPitch;
                                         if (sec === 0 || art1Info.EG2DecayTime === 0) {
                                             dddx = 0;
                                         } else {
-                                            if (sec !== art1Info.EG2AttackTime) {
-                                                dddx = art1Info.EG2ToPitch * (sec - art1Info.EG2AttackTime) / (art1Info.EG2DecayTime);
+                                            if (sec !== attackTime) {
+                                                dddx = art1Info.EG2ToPitch -  art1Info.EG2ToPitch * Math.min(1, (sec - attackTime) / decayTime);
                                             }
                                         }
-                                        dddx = Math.max(dddx, art1Info.EG2ToPitch * art1Info.EG2SustainLevel / 100.0);
+                                        dddx = art1Info.EG2ToPitch > 0 ? 
+                                            Math.max(dddx, art1Info.EG2ToPitch * art1Info.EG2SustainLevel / 100.0) :
+                                            Math.min(dddx, art1Info.EG2ToPitch * art1Info.EG2SustainLevel / 100.0);
                                         if (art1Info.EG2ReleaseTime === 0) {
-                                            sampleOffsetSpeedCents = 0;
+                                            eg2PitchCents = 0;
                                         } else {
                                             if (noteInfo.endOffset === offset) {
-                                                sampleOffsetSpeedCents = dddx;
+                                                eg2PitchCents = dddx;
                                             } else {
-                                                sampleOffsetSpeedCents = art1Info.EG2ToPitch * secFromReleased / (art1Info.EG2ReleaseTime);
+                                                eg2PitchCents = art1Info.EG2ToPitch - art1Info.EG2ToPitch * Math.min(1, secFromReleased / (art1Info.EG2ReleaseTime));
                                             }
                                         }
-                                        sampleOffsetSpeedCents = Math.min(sampleOffsetSpeedCents, dddx);
+                                        eg2PitchCents = art1Info.EG2ToPitch > 0 ? 
+                                            Math.min(eg2PitchCents, dddx) : 
+                                            Math.max(eg2PitchCents, dddx);
                                     }
-                                    // sampleOffsetSpeedCents : cent単位
-                                    sampleOffsetSpeedCents = Math.max(0, Math.min(art1Info.EG2ToPitch, sampleOffsetSpeedCents));
+                                    // eg2PitchCents : cent単位
+                                    eg2PitchCents = Math.max(-1200, Math.min(1200, eg2PitchCents));
                                 }
+                                sampleOffsetSpeedCents += eg2PitchCents;
                                 // LFO情報もpositionDXに適用 (cent単位)
-                                let lfo = 0;
+                                let lfoPitchCents = 0;
                                 if (art1Info.LFOToPitch !== 0 || art1Info.PitchPerModWheel !== 0) {
                                     // 遅延が存在する場合は遅延時間以降でサインカーブを生成
                                     // また, -50～50(DLSに設定が存在する場合は別)centでmodulationWheelを適用
                                     if (sec >= art1Info.LFODelay) {
-                                        lfo = Math.sin((sec - art1Info.LFODelay) * Math.PI * 2 * art1Info.LFOFrequency) * (art1Info.LFOToPitch + (art1Info.PitchPerModWheel || 50) * (channelInfo.modWheel / 128));
+                                        lfoPitchCents = Math.sin((sec - art1Info.LFODelay) * Math.PI * 2 * art1Info.LFOFrequency) * (art1Info.LFOToPitch + (art1Info.PitchPerModWheel || 50) * (channelInfo.modWheel / 128));
                                     }
                                     //if (channelInfo.modWheel > 0) console.log(channelID, offset, sec, art1Info.LFODelay, channelInfo.modWheel, lfo, art1Info.LFOToPitch, art1Info.PitchPerModWheel);
                                 }
-                                sampleOffsetSpeedCents += lfo;
+                                eg2PitchCents += lfoPitchCents;
                                 if (wsmp) {
                                     // sFineTune を加味 (NOTE : DLSの仕様では65536で割るべきっぽいけどgm.dlsのfineTuneの内容的に行わない)
                                     sampleOffsetSpeedCents += wsmp.sFineTune;
@@ -715,9 +808,9 @@ export namespace Synthesizer {
                                     pitchBendCents = pitchBend / 8192 * 1200 / 12 * (channelInfo?.pitchBendSensitivity || 2);
                                 }
                                 sampleOffsetSpeedCents += pitchBendCents;
-                                // sampleOffsetSpeedGain : 増加率 (cent = 1200分の1オクターブとして慶安)
+                                // sampleOffsetSpeedGain : 増加率 (cent = 1200分の1オクターブとして計算)
                                 nextSampleOffsetSpeedGain = (2 ** (sampleOffsetSpeedCents / 1200));
-                                // if (offset % 1000000 === 10 || offset % 1000000 === 11) console.log(offset, channelID, position, pitchBendMap.get(channelID), lastSampleOffset, sampleOffsetSpeedGain, nextSampleOffsetSpeedGain, pitchBendSpeedGain, sampleOffsetSpeedCents, sampleOffsetDefaultSpeed, freqRate, wsmp?.sFineTune);
+                                // if (sec > 2.0) console.log(offset, channelID, position, sec, pitchBendMap.get(channelID), lastSampleOffset, sampleOffsetSpeedGain, nextSampleOffsetSpeedGain, sampleOffsetSpeedCents, sampleOffsetDefaultSpeed, freqRate, wsmp?.sFineTune, lfoPitchCents, eg2PitchCents, art1Info);
                             }
                             let sampleOffset = Math.max(0, lastSampleOffset + sampleOffsetDefaultSpeed * freqRate * nextSampleOffsetSpeedGain);
                             noteIDAttackedOffsetMap.get(channelID).set(noteID, [attackedOffset, noteInfo, nextSampleOffsetSpeedGain, sampleOffset]);
@@ -726,10 +819,10 @@ export namespace Synthesizer {
                             if (waveLooping && sampleOffset >= (waveLoopStart + waveLoopLength)) {
                                 sampleOffset = ((sampleOffset - (waveLoopStart + waveLoopLength)) % waveLoopLength) + waveLoopStart;
                             } else if (!waveLooping && sampleOffset >= waveChunk.pcmData.length-1) {
-                                if (offset <= noteInfo.endOffset) {
+                                // if (offset <= noteInfo.endOffset) {
                                     // NOTE ONのうちにワンショット系の時間が過ぎているので一応警告
-                                    console.warn("sampleOffset is out of BOUND", sampleOffset );
-                                }
+                                    // console.warn("sampleOffset is out of BOUND", sampleOffset );
+                                // }
                                 noteIDAttackedOffsetMap.get(channelID).delete(noteID);
                                 return;
                             }
@@ -746,7 +839,6 @@ export namespace Synthesizer {
                             }
                             // EG1(Envelope Generator for Volume)情報を反映
                             // NOTE : AttenuationはdB単位で取得し最後に雑に指数関数的に減衰させる
-                            let eg1Velocity = 1.0;
                             let eg1Attenuation = 96;
                             if (art1Info) {
                                 let attackTime = 0;
@@ -774,64 +866,43 @@ export namespace Synthesizer {
                                 }
                                 if (sec < attackTime) {
                                     // Attack Zone
-                                    eg1Velocity = sec / attackTime;
                                     eg1Attenuation = Math.min(96, sec === 0 ? 96 : 20 * Math.log10(attackTime / sec));
                                 } else if (positionFromReleased <= 0) {
                                     // Decay or Sustain Zone
                                     if (sec === 0 || decayTime === 0) {
-                                        eg1Velocity = 0;
                                         eg1Attenuation = 96;
                                     } else {
                                         if (sec === attackTime) {
-                                            eg1Velocity = 1.0;
                                             eg1Attenuation = 0;
                                         } else {
-                                            eg1Velocity = -Math.log10(Math.max(0, (sec - attackTime)) / decayTime + 0.1);
-                                            if (isNaN(eg1Velocity)) {
-                                                console.error("decay", sec, attackTime, secFromReleased, art1Info.EG1ReleaseTime)
-                                            }
                                             eg1Attenuation = 96 * (sec - attackTime) / decayTime;
                                         }
                                     }
-                                    eg1Velocity = Math.max(eg1Velocity, art1Info.EG1SustainLevel / 100.0);
                                     eg1Attenuation = Math.min(eg1Attenuation, 96 * (1 - art1Info.EG1SustainLevel / 100.0));
                                 } else {
                                     // Sustain or Release Zone
-                                    let dVolume = 1.0;
                                     let dAttenuation = 96;
                                     if (sec === 0 || decayTime === 0) {
-                                        dVolume = 0;
                                         dAttenuation = 96;
                                     } else {
                                         if (sec === attackTime) {
-                                            dVolume = 1.0;
                                             dAttenuation = 0;
                                         } else {
-                                            dVolume = -Math.log10(Math.max(0, (sec - attackTime)) / decayTime + 0.1);
                                             dAttenuation = 96 * (sec - attackTime) / decayTime;
                                         }
                                     }
-                                    dVolume = Math.max(dVolume, art1Info.EG1SustainLevel / 100.0);
                                     dAttenuation = Math.min(dAttenuation, 96 * (1 - art1Info.EG1SustainLevel / 100.0));
                                     if (art1Info.EG1ReleaseTime === 0) {
-                                        eg1Velocity = 0;
                                         eg1Attenuation = 96;
                                     } else {
                                         if (offset === noteInfo.endOffset) {
-                                            eg1Velocity = dVolume;
                                             eg1Attenuation = dAttenuation;
                                         } else {
-                                            eg1Velocity = -Math.log10(Math.max(0, secFromReleased) / (art1Info.EG1ReleaseTime) + 0.1);
-                                            if (isNaN(eg1Velocity)) {
-                                                console.error("release", secFromReleased, art1Info.EG1ReleaseTime)
-                                            }
                                             eg1Attenuation = 96 * secFromReleased / art1Info.EG1ReleaseTime;
                                         }
                                     }
-                                    eg1Velocity = Math.min(eg1Velocity, dVolume);
                                     eg1Attenuation = Math.max(eg1Attenuation, dAttenuation);
                                 }
-                                eg1Velocity = Math.min(1.0, Math.max(0, eg1Velocity));
                                 eg1Attenuation = Math.min(96, Math.max(0, eg1Attenuation));
                                 // if (positionFromReleased === -1 || positionFromReleased === 0 || positionFromReleased === 1) console.log(offset, channelID, noteID, noteInfo.endOffset, noteInfo.length, position, sec, secFromReleased, sec <= attackTime, positionFromReleased <= 0, eg1Velocity, eg1Attenuation, dAttenuation, attackTime, art1Info.EG1AttackTime, art1Info.EG1VelocityToAttack);
                             }
@@ -857,6 +928,8 @@ export namespace Synthesizer {
                             }
                             let sampleWaveDataR = sampleWaveData;
                             let sampleWaveDataL = sampleWaveData;
+                            // Velocity Attenuation
+                            let velocityAttenuation = Math.min(96, 20 * Math.log10(127 / noteInfo.velocity));
                             // Volume Attenuation
                             let volumeAttenuation = 0;
                             if (channelInfo) {
@@ -881,10 +954,10 @@ export namespace Synthesizer {
                             }
                             // if (offset % 1000000 === 1) console.log(offset, channelID, eg1Attenuation, lfoAttenuation, wsmpAttenuation, wsmpAttenuation, 127 - 10 ** ((wsmpAttenuation*40 + lfoAttenuation)), 20 * Math.log10((127**2)-(eg1Attenuation**2)), 0.1 ** ((eg1Attenuation + lfoAttenuation + wsmpAttenuation) / 20));
                             // if (offset % 1000000 === 0) console.log(offset, channelID, art1Info.LFOFrequency, art1Info.LFOToVolume, art1Info.LFOToPitch, art1Info.LFODelay, lfo);
-                            sampleWaveDataR = (sampleWaveData * (0.1 ** ((Math.max(0, eg1Attenuation + wsmpAttenuation + lfoAttenuation + volumeAttenuation + expressionAttenuation + panAttenuationR)) / 20)));
-                            sampleWaveDataL = (sampleWaveData * (0.1 ** ((Math.max(0, eg1Attenuation + wsmpAttenuation + lfoAttenuation + volumeAttenuation + expressionAttenuation + panAttenuationL)) / 20)));
+                            sampleWaveDataR = (sampleWaveData * (0.1 ** ((Math.max(0, eg1Attenuation + velocityAttenuation + wsmpAttenuation + lfoAttenuation + volumeAttenuation + expressionAttenuation + panAttenuationR)) / 20)));
+                            sampleWaveDataL = (sampleWaveData * (0.1 ** ((Math.max(0, eg1Attenuation + velocityAttenuation +  wsmpAttenuation + lfoAttenuation + volumeAttenuation + expressionAttenuation + panAttenuationL)) / 20)));
                             if (isNaN(sampleWaveData)) {
-                                console.error(offset, eg1Velocity, lfo, sampleOffset, sampleWaveData, art1Info.EG1ReleaseTime, channelInfo.volume);
+                                console.error(channelID, offset, lfo, sampleOffset, sampleWaveData, art1Info.EG1ReleaseTime, channelInfo.volume);
                             }
                             waveDataR[offset] += sampleWaveDataR;
                             waveDataL[offset] += sampleWaveDataL;
@@ -968,7 +1041,7 @@ export namespace Synthesizer {
         const result = new SynthesizeResult();
         result.waveSegment = ret;
         result.channelToWaveSegment = channelRiffDatas;
-        result.channelToInstrument = new Map(Array.from(channelIDs).map(channelID => [channelID, channelInfoMap.get(channelID)[1].insChunk]));
+        result.channelToInstrument = new Map(Array.from(channelIDs).map(channelID => [channelID, channelInfoMap.get(channelID)?.[1]?.insChunk]));
         return result;
     }
 }

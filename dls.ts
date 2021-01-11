@@ -357,6 +357,7 @@ export class DLSParser{
                         const waveChunk = new DLS.WaveChunk(subOffset + 8, wvplSubSize, {
                             rawData: wave,
                             bytesPerSecond: data.getUint32(subOffset + 24, true), // 8 + 16 <- sample byte/sec rate (ex. 44100 Hz)
+                            dataOffset: dataOffset,
                             segmentData: segment,
                             pcmData: pcmData,
                             waveData: blob,
