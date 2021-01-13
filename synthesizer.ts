@@ -239,6 +239,7 @@ export namespace Synthesizer {
         expression   : number = 127;
         pan          : number = undefined;
         modWheel     : number = 0;
+        chorusLevel  : number = 0;
 
         rpnLSB         : number = 127;
         rpnMSB         : number = 127;
@@ -254,9 +255,11 @@ export namespace Synthesizer {
     }
 
     export class SynthesizeResult {
-        waveSegment : Uint8Array;
-        channelToWaveSegment : Map<number, Uint8Array>;
-        channelToInstrument  : Map<number, DLS.InsChunk>;
+        waveSegment           : Uint8Array;
+        waveSegmentWithEffect : Uint8Array;
+        waveSegmentOnlyEffect : Uint8Array;
+        channelToWaveSegment  : Map<number, Uint8Array>;
+        channelToInstrument   : Map<number, DLS.InsChunk>;
 
         constructor() {
             this.channelToWaveSegment = new Map();
@@ -264,50 +267,15 @@ export namespace Synthesizer {
         }
     }
 
-    export async function synthesizeMIDI(midi : MidiParseInfo, dls : DLSParseInfo) :  Promise<SynthesizeResult> {
-        const riffData = new Array<number>(); // uint8
+    export async function synthesizeMIDI(midi : MidiParseInfo, dls : DLSParseInfo, withEffect: boolean = true, outputChannel : boolean = true) :  Promise<SynthesizeResult> {
         const waveDataR = new Array<number>(); // int16
         const waveDataL = new Array<number>(); // int16
-        riffData[0] = 'R'.charCodeAt(0);
-        riffData[1] = 'I'.charCodeAt(0);
-        riffData[2] = 'F'.charCodeAt(0);
-        riffData[3] = 'F'.charCodeAt(0);
-        riffData[8]  = 'W'.charCodeAt(0);
-        riffData[9]  = 'A'.charCodeAt(0);
-        riffData[10] = 'V'.charCodeAt(0);
-        riffData[11] = 'E'.charCodeAt(0);
-        riffData[12] = 'f'.charCodeAt(0);
-        riffData[13] = 'm'.charCodeAt(0);
-        riffData[14] = 't'.charCodeAt(0);
-        riffData[15] = ' '.charCodeAt(0);
-        riffData[16] = 16;   // fmt block in 20-32
-        riffData[17] = 0;
-        riffData[18] = 0;
-        riffData[19] = 0;
-        riffData[20] = 1;    // linear PCM
-        riffData[21] = 0;
-        riffData[22] = 2;    // Stereo
-        riffData[23] = 0;
-        riffData[24] = 0x44; // 44100 Hz
-        riffData[25] = 0xAC;
-        riffData[26] = 0x00;
-        riffData[27] = 0x00;
-        riffData[28] = 0x10; // 44100 * 4 = 176400 bytes / sec
-        riffData[29] = 0xB1;
-        riffData[30] = 0x02;
-        riffData[31] = 0x00;
-        riffData[32] = 4;    // 4byte / frame
-        riffData[33] = 0;
-        riffData[34] = 16;   // 16bit / frame
-        riffData[35] = 0;
-        riffData[36] = 'd'.charCodeAt(0);
-        riffData[37] = 'a'.charCodeAt(0);
-        riffData[38] = 't'.charCodeAt(0);
-        riffData[39] = 'a'.charCodeAt(0);
-        riffData[40] = 0;
-        riffData[41] = 0;
-        riffData[42] = 0;
-        riffData[43] = 0;
+
+        // enable only withEffect
+        const waveDataWithEffectR = new Array<number>(); // int16
+        const waveDataWithEffectL = new Array<number>(); // int16
+        const waveDataOnlyEffectR = new Array<number>(); // int16
+        const waveDataOnlyEffectL = new Array<number>(); // int16
 
         // rgn offset(number) -> art1Info(for rgn)
         const lartOffsetToArt1InfoMap = new Map<number, Art1Info>();
@@ -447,6 +415,7 @@ export namespace Synthesizer {
                         } else if (mtrkEvent.event.controlCommand === 93) {
                             // Chorus
                             if (mtrkEvent.event.value1 !== 0) {
+                                channelInfo.chorusLevel = mtrkEvent.event.value1;
                                 console.warn("not implemented Chorus", mtrkEvent.event.value1)
                             }
                         } else if (mtrkEvent.event.controlCommand === 94) {
@@ -588,7 +557,6 @@ export namespace Synthesizer {
         });
 
         // 3. 各チャンネルごとに全オフセット見て回り、 Wave用PCM作成(ここの割合が一番大きい)
-        
         // channelID -> [waveDataR(Int16Array), waveDataL(Int16Array)]
         const channelWaveDatas = new Map<number, [Array<number>, Array<number>]>();
 
@@ -607,16 +575,38 @@ export namespace Synthesizer {
         // channeiID -> [waveDataMin, waveDataMax]
         const channelWaveDataMaxMin = new Map<number, [number, number]>();
 
+        // for Chorus
+        const chorusDelay = Math.trunc(44100 * 15.0 / 1000); // 0.05s
+        const waveDataBufferForChorusCapacity = chorusDelay + Math.ceil(20 / 3.2 * 44100 / 1000) + 1;
+        const waveDataBufferForChorus : [Array<number>, Array<number>] = [
+            new Array(),
+            new Array(),
+        ]; // NOTE: メモリを消費しすぎないようにする
+
         for (let offset = 0; offset < maxOffset; offset++) {
             if (offset % 10000 === 0) {
                 console.log("Synthesize Processing... ", offset, "/", Math.ceil(maxOffset));
             }
             waveDataR[offset] = 0;
             waveDataL[offset] = 0;
+            const offsetForChorus = offset % waveDataBufferForChorusCapacity;
+            if (withEffect) {
+                waveDataWithEffectR[offset] = 0;
+                waveDataWithEffectL[offset] = 0;
+                waveDataOnlyEffectR[offset] = 0;
+                waveDataOnlyEffectL[offset] = 0;
+                waveDataBufferForChorus[0][offsetForChorus] = 0;
+                waveDataBufferForChorus[1][offsetForChorus] = 0;
+            }
+
+            let offsetForChannelData = offset;
+            if (!outputChannel) {
+                offsetForChannelData = offset % 256;
+            }
             
             channelIDs.forEach((channelID) => {
-                channelWaveDatas.get(channelID)[0][offset] = 0;
-                channelWaveDatas.get(channelID)[1][offset] = 0;
+                channelWaveDatas.get(channelID)[0][offsetForChannelData] = 0;
+                channelWaveDatas.get(channelID)[1][offsetForChannelData] = 0;
                 // if (channelID !== 0) return; // 仮置
                 const channelEvent = offsetChannelInfoMap.get(channelID)?.get(offset);
                 if (channelEvent) {
@@ -644,16 +634,14 @@ export namespace Synthesizer {
                 }
 
                 // 現在Onになっているノートに対してサンプルを収集しwaveDataに格納してく
+                const channelData = channelInfoMap.get(channelID);
+                if (!channelData) {
+                    // データがないから格納作業もできない
+                    return
+                }
+                let [channelInfo, instrumentData, art1Info, lart] = channelData;
                 let attackingNotes = channelIDAttackingNoteMap.get(channelID);
                 if (attackingNotes.length >= 1) {
-                    const channelData = channelInfoMap.get(channelID);
-                    let channelInfo : ChannelInfo;
-                    let instrumentData : InstrumentData;
-                    let art1Info       : Art1Info;
-                    let lart           : DLS.LartChunk;
-                    if (channelData) {
-                        [channelInfo, instrumentData, art1Info, lart] = channelInfoMap.get(channelID);
-                    }
                     attackingNotes.forEach((attackingNoteData, arrayIndex) => {
                         if (!channelData) return;
                         if (!attackingNoteData) return;
@@ -977,8 +965,11 @@ export namespace Synthesizer {
                             }
                             waveDataR[offset] += sampleWaveDataR;
                             waveDataL[offset] += sampleWaveDataL;
-                            channelWaveDatas.get(channelID)[0][offset] += sampleWaveDataR;
-                            channelWaveDatas.get(channelID)[1][offset] += sampleWaveDataL;
+                            waveDataWithEffectR[offset] += sampleWaveDataR;
+                            waveDataWithEffectL[offset] += sampleWaveDataL;
+
+                            channelWaveDatas.get(channelID)[0][offsetForChannelData] += sampleWaveDataR;
+                            channelWaveDatas.get(channelID)[1][offsetForChannelData] += sampleWaveDataL;
                             // console.log(offset, attackedOffset, noteInfo, positionDX, art1Info, wsmp, position, sampleOffset, freqRate, sampleWaveData, eg1Velocity, waveLoopLength, waveLoopStart, waveInfo.wave.pcmData.length);
                             if (sec >= 1 && eg1Attenuation + velocityAttenuation + wsmpAttenuation + lfoAttenuation + volumeAttenuation + expressionAttenuation >= 96) {
                                 // なり始めてから時間がそれなりに経ち音量が下がりきってる -> 配列から除去(計算の対象外とする)
@@ -986,33 +977,76 @@ export namespace Synthesizer {
                             }
                         }
                     });
-                }
-                // 消えたデータを除去
-                channelIDAttackingNoteMap.set(channelID, attackingNotes.filter(data => !!data));
 
-                if (!channelWaveDataMaxMin.get(channelID)) {
-                    channelWaveDataMaxMin.set(channelID, [channelWaveDatas.get(channelID)[0][offset] || 1, channelWaveDatas.get(channelID)[0][offset] || -1]);
+                    // 消えたデータを除去
+                    channelIDAttackingNoteMap.set(channelID, attackingNotes.filter(data => !!data));
+                }
+
+                // コーラス集計
+                if (withEffect && channelInfo.chorusLevel > 0) {
+                    waveDataBufferForChorus[0][offsetForChorus] += channelWaveDatas.get(channelID)[0][offsetForChannelData] * (channelInfo.chorusLevel / 127);
+                    waveDataBufferForChorus[1][offsetForChorus] += channelWaveDatas.get(channelID)[1][offsetForChannelData] * (channelInfo.chorusLevel / 127);
+                }
+
+                if (!channelWaveDataMaxMin.has(channelID)) {
+                    channelWaveDataMaxMin.set(channelID, [
+                        channelWaveDatas.get(channelID)[0][offsetForChannelData] || 1, 
+                        channelWaveDatas.get(channelID)[0][offsetForChannelData] || -1
+                    ]);
                 } else {
                     const [max, min] = channelWaveDataMaxMin.get(channelID);
                     channelWaveDataMaxMin.set(channelID, [
-                        Math.max(max, channelWaveDatas.get(channelID)[0][offset] || 1, channelWaveDatas.get(channelID)[1][offset] || 1), 
-                        Math.min(min, channelWaveDatas.get(channelID)[0][offset] || -1, channelWaveDatas.get(channelID)[1][offset] || -1)
+                        Math.max(max, channelWaveDatas.get(channelID)[0][offsetForChannelData] || 1, channelWaveDatas.get(channelID)[1][offset] || 1), 
+                        Math.min(min, channelWaveDatas.get(channelID)[0][offsetForChannelData] || -1, channelWaveDatas.get(channelID)[1][offset] || -1)
                     ]);
                 }
             });
+
+            // コーラス適用
+            let delayOffsetForChorus = offsetForChorus - chorusDelay;
+            delayOffsetForChorus -= (1+Math.sin(offset / 44100 * 2 * Math.PI * (3 * 0.122))) * (20 / 3.2 * 44100 / 1000) / 2;
+            const deltaForChorus = delayOffsetForChorus - Math.floor(delayOffsetForChorus);
+            delayOffsetForChorus = Math.round(delayOffsetForChorus - deltaForChorus);
+            while (delayOffsetForChorus < 0) {
+                delayOffsetForChorus = delayOffsetForChorus + waveDataBufferForChorusCapacity;
+            }
+            let delayOffsetForChorus1 = (delayOffsetForChorus+1) % waveDataBufferForChorusCapacity;
+
+            const chorusDataR = (1-deltaForChorus) * (waveDataBufferForChorus[0][delayOffsetForChorus] || 0) + 
+                deltaForChorus * (waveDataBufferForChorus[0][delayOffsetForChorus1] || 0);
+            waveDataBufferForChorus[0][offsetForChorus] += chorusDataR * (8 * 0.763 * 0.01);
+            waveDataWithEffectR[offset] = waveDataR[offset] + chorusDataR;
+            waveDataOnlyEffectR[offset] = chorusDataR;
+
+            const chorusDataL = (1-deltaForChorus) * (waveDataBufferForChorus[1][delayOffsetForChorus] || 0) + 
+                deltaForChorus * (waveDataBufferForChorus[1][delayOffsetForChorus1] || 0);
+            waveDataBufferForChorus[1][offsetForChorus] += chorusDataL * (8 * 0.763 * 0.01);
+            waveDataWithEffectL[offset] = waveDataL[offset] + chorusDataL;
+            waveDataOnlyEffectL[offset] = chorusDataL;
+
+            // for debug
+            // if (offset % 10000 <= 10) {
+            //     console.log(offset, offsetForChorus, deltaForChorus, delayOffsetForChorus, delayOffsetForChorus1, waveDataR[offset],
+            //         waveDataHistoryR, waveDataHistoryL,
+            //         waveDataBufferForChorus[0][offsetForChorus], waveDataWithEffectR[offset]);
+            //     //console.log(offset, waveDataBufferForChorus[0][offsetForChorus], waveDataBufferForChorus[0][delayOffsetForChorus], waveDataBufferForChorus[0][delayOffsetForChorus1], offsetForChorus, delayOffsetForChorus, delayOffsetForChorus1, waveDataWithEffectR[offset], waveDataWithEffectL[offset]);
+            // }
+
             if (waveDataR[offset]) {
-                waveDataRMax = Math.max(waveDataRMax, waveDataR[offset], waveDataL[offset]);
-                waveDataRMin = Math.min(waveDataRMin, waveDataR[offset], waveDataL[offset]);
+                waveDataRMax = Math.max(waveDataRMax, waveDataR[offset], waveDataL[offset], waveDataWithEffectR[offset], waveDataWithEffectL[offset]);
+                waveDataRMin = Math.min(waveDataRMin, waveDataR[offset], waveDataL[offset], waveDataWithEffectR[offset], waveDataWithEffectL[offset]);
             }
         }
 
         // -32768~32767に範囲をおさえる(音割れ防止)
         const correctRate = Math.min(32767 / waveDataRMax, -32768 / waveDataRMin);
-        console.log(waveDataRMax, waveDataRMin, correctRate);
+        //console.log(waveDataRMax, waveDataRMin, correctRate);
         if (correctRate < 1) {
             for (let offset = 0; offset < maxOffset; offset++) {
                 waveDataR[offset] = Math.round(waveDataR[offset] *  correctRate * 0.99);
                 waveDataL[offset] = Math.round(waveDataL[offset] *  correctRate * 0.99);
+                waveDataWithEffectR[offset] = Math.round(waveDataWithEffectR[offset] *  correctRate * 0.99);
+                waveDataWithEffectL[offset] = Math.round(waveDataWithEffectL[offset] *  correctRate * 0.99);
             }
         }
 
@@ -1020,7 +1054,52 @@ export namespace Synthesizer {
         
         // console.log(JSON.stringify(waveData.slice(50000, 100000)));
 
-        // waveデータをriffに入れて新waveを作成 (Little Endian)
+        // 4. Uint16Array -> Uint8Array に変換して Waveのヘッダを載せて完成
+        const result = new SynthesizeResult();
+        
+        const riffData = new Array<number>(); // uint8
+
+        riffData[0] = 'R'.charCodeAt(0);
+        riffData[1] = 'I'.charCodeAt(0);
+        riffData[2] = 'F'.charCodeAt(0);
+        riffData[3] = 'F'.charCodeAt(0);
+        riffData[8]  = 'W'.charCodeAt(0);
+        riffData[9]  = 'A'.charCodeAt(0);
+        riffData[10] = 'V'.charCodeAt(0);
+        riffData[11] = 'E'.charCodeAt(0);
+        riffData[12] = 'f'.charCodeAt(0);
+        riffData[13] = 'm'.charCodeAt(0);
+        riffData[14] = 't'.charCodeAt(0);
+        riffData[15] = ' '.charCodeAt(0);
+        riffData[16] = 16;   // fmt block in 20-32
+        riffData[17] = 0;
+        riffData[18] = 0;
+        riffData[19] = 0;
+        riffData[20] = 1;    // linear PCM
+        riffData[21] = 0;
+        riffData[22] = 2;    // Stereo
+        riffData[23] = 0;
+        riffData[24] = 0x44; // 44100 Hz
+        riffData[25] = 0xAC;
+        riffData[26] = 0x00;
+        riffData[27] = 0x00;
+        riffData[28] = 0x10; // 44100 * 4 = 176400 bytes / sec
+        riffData[29] = 0xB1;
+        riffData[30] = 0x02;
+        riffData[31] = 0x00;
+        riffData[32] = 4;    // 4byte / frame
+        riffData[33] = 0;
+        riffData[34] = 16;   // 16bit / frame
+        riffData[35] = 0;
+        riffData[36] = 'd'.charCodeAt(0);
+        riffData[37] = 'a'.charCodeAt(0);
+        riffData[38] = 't'.charCodeAt(0);
+        riffData[39] = 'a'.charCodeAt(0);
+        riffData[40] = 0;
+        riffData[41] = 0;
+        riffData[42] = 0;
+        riffData[43] = 0;
+
         for (let i = 0; i < waveDataR.length; i++) {
             const subOffset = 44 + i * 4;
             riffData[subOffset]   = (!waveDataR[i]) ? 0 : waveDataR[i] & 0xFF;
@@ -1028,43 +1107,71 @@ export namespace Synthesizer {
             riffData[subOffset+2] = (!waveDataL[i]) ? 0 : waveDataL[i] & 0xFF;
             riffData[subOffset+3] = (!waveDataL[i]) ? 0 : ((waveDataL[i] >> 8) & 0xFF);
         }
-        const ret = new Uint8Array(riffData);
-        Util.setLittleEndianNumberToUint8Array(ret, 4, 4, waveDataR.length * 4 + 44);
-        Util.setLittleEndianNumberToUint8Array(ret, 40, 4, waveDataR.length * 4);
+        const waveDataSegment = new Uint8Array(riffData);
+        Util.setLittleEndianNumberToUint8Array(waveDataSegment, 4, 4, waveDataR.length * 4 + 44);
+        Util.setLittleEndianNumberToUint8Array(waveDataSegment, 40, 4, waveDataR.length * 4);
+        result.waveSegment = waveDataSegment;
 
-        const channelRiffDatas = new Map<number, Uint8Array>();
-        channelIDs.forEach(channelID => {
-            const waveDataR = channelWaveDatas.get(channelID)[0];
-            const waveDataL = channelWaveDatas.get(channelID)[1];
-
-            const mm = channelWaveDataMaxMin.get(channelID);
-            if (!mm)return;
-            const [max, min] = mm;
-            const correctRate = Math.min(1, 32767 / max, -32768 / min);
-            if (correctRate < 1) {
-                for (let offset = 0; offset < maxOffset; offset++) {
-                    waveDataR[offset] = Math.round(waveDataR[offset] * correctRate * 0.99);
-                    waveDataL[offset] = Math.round(waveDataR[offset] * correctRate * 0.99);
-                }
-            }
-            // RIFFデータを雑に塗り替えながらチャンネル別のwave作成(波形のみ塗りつぶすため問題なし)
-            for (let i = 0; i < waveDataR.length; i++) {
+        if (withEffect) {
+            const riffDataWithEffect = Array.from(riffData);
+            for (let i = 0; i < waveDataWithEffectR.length; i++) {
                 const subOffset = 44 + i * 4;
-                riffData[subOffset]   = (!waveDataR[i]) ? 0 : waveDataR[i] & 0xFF;
-                riffData[subOffset+1] = (!waveDataR[i]) ? 0 : ((waveDataR[i] >> 8) & 0xFF);
-                riffData[subOffset+2] = (!waveDataL[i]) ? 0 : waveDataL[i] & 0xFF;
-                riffData[subOffset+3] = (!waveDataL[i]) ? 0 : ((waveDataL[i] >> 8) & 0xFF);
+                riffDataWithEffect[subOffset]   = (!waveDataWithEffectR[i]) ? 0 : waveDataWithEffectR[i] & 0xFF;
+                riffDataWithEffect[subOffset+1] = (!waveDataWithEffectR[i]) ? 0 : ((waveDataWithEffectR[i] >> 8) & 0xFF);
+                riffDataWithEffect[subOffset+2] = (!waveDataWithEffectL[i]) ? 0 : waveDataWithEffectL[i] & 0xFF;
+                riffDataWithEffect[subOffset+3] = (!waveDataWithEffectL[i]) ? 0 : ((waveDataWithEffectL[i] >> 8) & 0xFF);
             }
-            const channelRiffData = new Uint8Array(riffData);
-            Util.setLittleEndianNumberToUint8Array(channelRiffData, 4, 4, waveDataR.length * 4 + 44);
-            Util.setLittleEndianNumberToUint8Array(channelRiffData, 40, 4, waveDataR.length * 4);
-            channelRiffDatas.set(channelID, channelRiffData);
-        });
+            const waveDataSegmentWithEffect = new Uint8Array(riffDataWithEffect);
+            Util.setLittleEndianNumberToUint8Array(waveDataSegmentWithEffect, 4, 4, waveDataWithEffectR.length * 4 + 44);
+            Util.setLittleEndianNumberToUint8Array(waveDataSegmentWithEffect, 40, 4, waveDataWithEffectR.length * 4);
+            result.waveSegmentWithEffect = waveDataSegmentWithEffect;
+            const riffDataOnlyEffect = Array.from(riffData);
+            for (let i = 0; i < waveDataWithEffectR.length; i++) {
+                const subOffset = 44 + i * 4;
+                riffDataOnlyEffect[subOffset]   = (!waveDataOnlyEffectR[i]) ? 0 : waveDataOnlyEffectR[i] & 0xFF;
+                riffDataOnlyEffect[subOffset+1] = (!waveDataOnlyEffectR[i]) ? 0 : ((waveDataOnlyEffectR[i] >> 8) & 0xFF);
+                riffDataOnlyEffect[subOffset+2] = (!waveDataOnlyEffectL[i]) ? 0 : waveDataOnlyEffectL[i] & 0xFF;
+                riffDataOnlyEffect[subOffset+3] = (!waveDataOnlyEffectL[i]) ? 0 : ((waveDataOnlyEffectR[i] >> 8) & 0xFF);
+            }
+            const waveDataSegmentOnlyEffect = new Uint8Array(riffDataOnlyEffect);
+            Util.setLittleEndianNumberToUint8Array(waveDataSegmentOnlyEffect, 4, 4, waveDataWithEffectR.length * 4 + 44);
+            Util.setLittleEndianNumberToUint8Array(waveDataSegmentOnlyEffect, 40, 4, waveDataWithEffectR.length * 4);
+            result.waveSegmentOnlyEffect = waveDataSegmentOnlyEffect;
+        }
 
-        const result = new SynthesizeResult();
-        result.waveSegment = ret;
-        result.channelToWaveSegment = channelRiffDatas;
+        if (outputChannel) {
+            const channelRiffDatas = new Map<number, Uint8Array>();
+            channelIDs.forEach(channelID => {
+                const waveDataR = channelWaveDatas.get(channelID)[0];
+                const waveDataL = channelWaveDatas.get(channelID)[1];
+    
+                const mm = channelWaveDataMaxMin.get(channelID);
+                if (!mm)return;
+                const [max, min] = mm;
+                const correctRate = Math.min(1, 32767 / max, -32768 / min);
+                if (correctRate < 1) {
+                    for (let offset = 0; offset < maxOffset; offset++) {
+                        waveDataR[offset] = Math.round(waveDataR[offset] * correctRate * 0.99);
+                        waveDataL[offset] = Math.round(waveDataR[offset] * correctRate * 0.99);
+                    }
+                }
+                // RIFFデータを雑に塗り替えながらチャンネル別のwave作成(波形のみ塗りつぶすため問題なし)
+                for (let i = 0; i < waveDataR.length; i++) {
+                    const subOffset = 44 + i * 4;
+                    riffData[subOffset]   = (!waveDataR[i]) ? 0 : waveDataR[i] & 0xFF;
+                    riffData[subOffset+1] = (!waveDataR[i]) ? 0 : ((waveDataR[i] >> 8) & 0xFF);
+                    riffData[subOffset+2] = (!waveDataL[i]) ? 0 : waveDataL[i] & 0xFF;
+                    riffData[subOffset+3] = (!waveDataL[i]) ? 0 : ((waveDataL[i] >> 8) & 0xFF);
+                }
+                const channelRiffData = new Uint8Array(riffData);
+                Util.setLittleEndianNumberToUint8Array(channelRiffData, 4, 4, waveDataR.length * 4 + 44);
+                Util.setLittleEndianNumberToUint8Array(channelRiffData, 40, 4, waveDataR.length * 4);
+                channelRiffDatas.set(channelID, channelRiffData);
+            });
+            result.channelToWaveSegment = channelRiffDatas;
+        }
         result.channelToInstrument = new Map(Array.from(channelIDs).map(channelID => [channelID, channelInfoMap.get(channelID)?.[1]?.insChunk]));
+
         return result;
     }
 }
