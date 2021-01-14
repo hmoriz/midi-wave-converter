@@ -240,6 +240,7 @@ export namespace Synthesizer {
         pan          : number = undefined;
         modWheel     : number = 0;
         chorusLevel  : number = 0;
+        reverbLevel  : number = 0;
 
         rpnLSB         : number = 127;
         rpnMSB         : number = 127;
@@ -410,6 +411,7 @@ export namespace Synthesizer {
                         } else if (mtrkEvent.event.controlCommand === 91) {
                             // Reverb
                             if (mtrkEvent.event.value1 !== 0) {
+                                channelInfo.reverbLevel = mtrkEvent.event.value1;
                                 console.warn("not implemented REVERB", mtrkEvent.event.value1)
                             }
                         } else if (mtrkEvent.event.controlCommand === 93) {
@@ -576,12 +578,35 @@ export namespace Synthesizer {
         const channelWaveDataMaxMin = new Map<number, [number, number]>();
 
         // for Chorus
-        const chorusDelay = Math.trunc(44100 * 15.0 / 1000); // 0.05s
+        const chorusDelay = Math.trunc(44100 * 15.0 / 1000); // 0.15s
         const waveDataBufferForChorusCapacity = chorusDelay + Math.ceil(20 / 3.2 * 44100 / 1000) + 1;
         const waveDataBufferForChorus : [Array<number>, Array<number>] = [
-            new Array(),
-            new Array(),
+            new Array(), // R 16bit
+            new Array(), // L 16bit
         ]; // NOTE: メモリを消費しすぎないようにする
+
+        // for Reverb
+        const reverbDelay = Math.trunc(44100 * 2000.0 / 1000); // 2s
+        const waveDataBufferForReverbCapacity = reverbDelay + 1;
+        const waveDataBufferForReverbCapacities = [191, 373, 1559, 743];
+        const waveDataBufferForReverb : [Array<number>, Array<number>] = [
+            new Array(), // R 16bit
+            new Array(), // L 16bit
+        ];
+        const waveDataBufferForReverbB : [[Array<number>, Array<number>, Array<number>, Array<number>], [Array<number>, Array<number>, Array<number>, Array<number>]] = [
+            [new Array(), new Array(), new Array(), new Array()], // R [0, 1, 2, 3]
+            [new Array(), new Array(), new Array(), new Array()], // L [0, 1, 2, 3]
+        ]
+        let historyLPFR = 0;
+        let historyLPFL = 0;
+        let historyHPFR = 0;
+        let historyLHPF = 0;
+        let historyEPFR = 0;
+        let historyLEPF = 0;
+        const historyTAForReverb = [0, 0];
+        const historyTBForReverb = [0, 0];
+        const historySForReverb = [0, 0];
+        const historyTForReverb = [0, 0];
 
         for (let offset = 0; offset < maxOffset; offset++) {
             if (offset % 10000 === 0) {
@@ -590,6 +615,8 @@ export namespace Synthesizer {
             waveDataR[offset] = 0;
             waveDataL[offset] = 0;
             const offsetForChorus = offset % waveDataBufferForChorusCapacity;
+            const offsetForReverb = offset % waveDataBufferForReverbCapacity;
+            const offsetForReverbBs = waveDataBufferForReverbCapacities.map(capacity => offset % capacity);
             if (withEffect) {
                 waveDataWithEffectR[offset] = 0;
                 waveDataWithEffectL[offset] = 0;
@@ -597,6 +624,8 @@ export namespace Synthesizer {
                 waveDataOnlyEffectL[offset] = 0;
                 waveDataBufferForChorus[0][offsetForChorus] = 0;
                 waveDataBufferForChorus[1][offsetForChorus] = 0;
+                waveDataBufferForReverb[0][offsetForReverb] = 0;
+                waveDataBufferForReverb[1][offsetForReverb] = 0;
             }
 
             let offsetForChannelData = offset;
@@ -987,6 +1016,11 @@ export namespace Synthesizer {
                     waveDataBufferForChorus[0][offsetForChorus] += channelWaveDatas.get(channelID)[0][offsetForChannelData] * (channelInfo.chorusLevel / 127);
                     waveDataBufferForChorus[1][offsetForChorus] += channelWaveDatas.get(channelID)[1][offsetForChannelData] * (channelInfo.chorusLevel / 127);
                 }
+                // リバーブ集計
+                if (withEffect && channelInfo.reverbLevel > 0) {
+                    waveDataBufferForReverb[0][offsetForReverb] += channelWaveDatas.get(channelID)[0][offsetForChannelData] * (channelInfo.reverbLevel / 127);
+                    waveDataBufferForReverb[1][offsetForReverb] += channelWaveDatas.get(channelID)[1][offsetForChannelData] * (channelInfo.reverbLevel / 127);
+                }
 
                 if (!channelWaveDataMaxMin.has(channelID)) {
                     channelWaveDataMaxMin.set(channelID, [
@@ -1015,27 +1049,85 @@ export namespace Synthesizer {
             const chorusDataR = (1-deltaForChorus) * (waveDataBufferForChorus[0][delayOffsetForChorus] || 0) + 
                 deltaForChorus * (waveDataBufferForChorus[0][delayOffsetForChorus1] || 0);
             waveDataBufferForChorus[0][offsetForChorus] += chorusDataR * (8 * 0.763 * 0.01);
-            waveDataWithEffectR[offset] = waveDataR[offset] + chorusDataR;
-            waveDataOnlyEffectR[offset] = chorusDataR;
+            waveDataWithEffectR[offset] += chorusDataR;
+            waveDataOnlyEffectR[offset] += chorusDataR;
 
             const chorusDataL = (1-deltaForChorus) * (waveDataBufferForChorus[1][delayOffsetForChorus] || 0) + 
                 deltaForChorus * (waveDataBufferForChorus[1][delayOffsetForChorus1] || 0);
             waveDataBufferForChorus[1][offsetForChorus] += chorusDataL * (8 * 0.763 * 0.01);
-            waveDataWithEffectL[offset] = waveDataL[offset] + chorusDataL;
-            waveDataOnlyEffectL[offset] = chorusDataL;
+            waveDataWithEffectL[offset] += chorusDataL;
+            waveDataOnlyEffectL[offset] += chorusDataL;
 
-            // for debug
+            // // for debug
             // if (offset % 10000 <= 10) {
             //     console.log(offset, offsetForChorus, deltaForChorus, delayOffsetForChorus, delayOffsetForChorus1, waveDataR[offset],
-            //         waveDataHistoryR, waveDataHistoryL,
+            //         chorusDataR, chorusDataL,
             //         waveDataBufferForChorus[0][offsetForChorus], waveDataWithEffectR[offset]);
             //     //console.log(offset, waveDataBufferForChorus[0][offsetForChorus], waveDataBufferForChorus[0][delayOffsetForChorus], waveDataBufferForChorus[0][delayOffsetForChorus1], offsetForChorus, delayOffsetForChorus, delayOffsetForChorus1, waveDataWithEffectR[offset], waveDataWithEffectL[offset]);
             // }
+
+            // リバーブ適用
+            let delayOffsetForReverb = offsetForReverb - reverbDelay;
+            while (delayOffsetForReverb < 0) {
+                delayOffsetForReverb += waveDataBufferForChorusCapacity;
+            }
+
+            const fixpR = waveDataBufferForReverb[0][offsetForReverb] || 0
+            const fixpL = waveDataBufferForReverb[1][offsetForReverb] || 0
+
+            // R
+            historyLPFR = historyLPFR * 0.35 + 
+                ((waveDataBufferForReverbB[0][2][offsetForReverbBs[2]] || 0) + historyTBForReverb[0]) * 0.55 +
+                historyTAForReverb[0] * 0.125;
+            historyTAForReverb[0] = waveDataBufferForReverbB[0][3][offsetForReverbBs[3]] || 0;
+            const sR = waveDataBufferForReverbB[0][3][offsetForReverbBs[3]] = waveDataBufferForReverbB[0][0][offsetForReverbBs[0]] || 0;
+            waveDataBufferForReverbB[0][0][offsetForReverbBs[0]] = -historyLPFR;
+
+            const tR = (historyHPFR + fixpR) * 0.5;
+            historyHPFR = tR - fixpR;
+
+            waveDataBufferForReverbB[0][2][offsetForReverbBs[2]] = (sR - (fixpR * 0.12)) * 0.9;
+            historyTBForReverb[0] = waveDataBufferForReverbB[0][1][offsetForReverbBs[1]] || 0;
+            waveDataBufferForReverbB[0][1][offsetForReverbBs[1]] = tR;
+
+            historyEPFR = historyEPFR * 0.4 + historyTAForReverb[0] * 0.48;
+            waveDataWithEffectR[offset] += (historyEPFR + historyTAForReverb[0]) * 1.00787;
+            waveDataOnlyEffectR[offset] += (historyEPFR + historyTAForReverb[0]) * 1.00787;
+
+            // L
+            historyLPFL = historyLPFL * 0.35 + 
+                ((waveDataBufferForReverbB[1][2][offsetForReverbBs[2]] || 0) + historyTBForReverb[1]) * 0.55 +
+                historyTAForReverb[1] * 0.125;
+            historyTAForReverb[1] = waveDataBufferForReverbB[1][3][offsetForReverbBs[3]] || 0;
+            const sL = waveDataBufferForReverbB[1][3][offsetForReverbBs[3]] = waveDataBufferForReverbB[1][0][offsetForReverbBs[0]] || 0;
+            waveDataBufferForReverbB[1][0][offsetForReverbBs[0]] = -historyLPFL;
+
+            const tL = (historyLHPF + fixpL) * 0.5;
+            historyLHPF = tL - fixpL;
+
+            waveDataBufferForReverbB[1][2][offsetForReverbBs[2]] = (sL - (fixpL * 0.12)) * 0.9
+            historyTBForReverb[1] = waveDataBufferForReverbB[1][1][offsetForReverbBs[1]] || 0;
+            waveDataBufferForReverbB[1][1][offsetForReverbBs[1]] = tL;
+
+            historyLEPF = historyLEPF * 0.4 + historyTAForReverb[1] * 0.48;
+            waveDataWithEffectL[offset] += (historyLEPF + historyTAForReverb[1]) * 2.00787
+            waveDataOnlyEffectL[offset] += (historyLEPF + historyTAForReverb[1]) * 2.00787
+
 
             if (waveDataR[offset]) {
                 waveDataRMax = Math.max(waveDataRMax, waveDataR[offset], waveDataL[offset], waveDataWithEffectR[offset], waveDataWithEffectL[offset]);
                 waveDataRMin = Math.min(waveDataRMin, waveDataR[offset], waveDataL[offset], waveDataWithEffectR[offset], waveDataWithEffectL[offset]);
             }
+
+            // // for debug
+            // if (offset % 10000 <= 10) {
+            //     console.log(offset, offsetForReverb, offsetForReverbBs, delayOffsetForReverb, historyEPFR, waveDataR[offset],
+            //         historyLPFR, historyHPFR, historyEPFR,
+            //         waveDataBufferForReverb[0][offsetForReverb], waveDataWithEffectR[offset], waveDataOnlyEffectR[offset]);
+            //     // console.log(JSON.stringify(waveDataBufferForReverbB[0]));
+            //     // console.log(JSON.stringify(waveDataBufferForReverbB[1]));
+            // }
+            
         }
 
         // -32768~32767に範囲をおさえる(音割れ防止)
