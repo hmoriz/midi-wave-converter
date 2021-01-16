@@ -100,7 +100,7 @@ async function loadMIDIFile(e : Event) : Promise<void> {
         const parser = new MIDIParser();
         const parseResult = await parser.parseFile(file);
         console.log(parseResult);
-        const synthesizeResult = await Synthesizer.synthesizeMIDI(parseResult, dlsParseResult, true, outputChannelData);
+        const synthesizeResult = await Synthesizer.synthesizeMIDI(parseResult, dlsParseResult, withEffect, outputChannelData);
         const blob = new Blob([synthesizeResult.waveSegment]);
         const url = window.URL.createObjectURL(blob);
         const newAudio = document.createElement('audio');
@@ -168,12 +168,14 @@ async function loadMIDIFile(e : Event) : Promise<void> {
         }
         addChartFromUint8ToInt16(chart, dataset);
 
-        const dataset2 = new Uint8Array(dataSize*2);
-        for (let i = 0; i < dataSize; i++) {
-            const offset = firstNonZeroOffset + i * 1000;
-            dataset2.set(synthesizeResult.waveSegmentWithEffect.slice(offset, offset+2), i*2);
+        if (withEffect) {
+            const dataset2 = new Uint8Array(dataSize*2);
+            for (let i = 0; i < dataSize; i++) {
+                const offset = firstNonZeroOffset + i * 1000;
+                dataset2.set(synthesizeResult.waveSegmentWithEffect.slice(offset, offset+2), i*2);
+            }
+            addChartFromUint8ToInt16(chart, dataset2);
         }
-        addChartFromUint8ToInt16(chart, dataset2);
     }
 }
 

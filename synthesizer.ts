@@ -90,7 +90,6 @@ export namespace Synthesizer {
                         }
                         if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_KEYNUMBER) {
                             ret.EG1KeyToDecay = cb.lScale;
-                            console.log('CONN_EG1_DECAY', 'CONN_SRC_KEYNUMBER', cb.lScale, getSecondsFromArt1Scale(cb.lScale));
                             return;
                         }
                         break;
@@ -98,9 +97,6 @@ export namespace Synthesizer {
                         if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_NONE) {
                             // NOTE : おそらくここで定義されているのがSUSTAIN_LEVEL
                             ret.EG1SustainLevel = Math.max(0, Math.min(100.0, cb.lScale / 10));
-                            if (cb.lScale < 0 || cb.lScale > 1000) {
-                                console.warn('CONN_EG1_RESERVED', cb.lScale, getSecondsFromArt1Scale(cb.lScale));
-                            }
                             return;
                         }
                         break;
@@ -113,10 +109,6 @@ export namespace Synthesizer {
                     case DLS.ART1DESTINATION.CONN_EG1_SUSTAIN:
                         if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_NONE) {
                             ret.EG1ReservedTime = getSecondsFromArt1Scale(cb.lScale);
-                            console.warn('CONN_EG1_SUSTAIN', cb.lScale, getSecondsFromArt1Scale(cb.lScale));
-                            if (cb.lScale !== -2147483648) {
-                                console.error ("CONN_EG1_SUSTAIN", cb.lScale, cb.lScale / 65536, getSecondsFromArt1Scale(cb.lScale));
-                            }
                             return;
                         }
                         break;
@@ -127,7 +119,7 @@ export namespace Synthesizer {
                         }
                         if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_KEYONVELOCITY) {
                             ret.EG2VelocityToAttack = cb.lScale;
-                            console.error("EG2VelocityToAttack", cb.lScale, ret.EG1AttackTime);
+                            return;
                         }
                         break;
                     case DLS.ART1DESTINATION.CONN_EG2_DECAY:
@@ -144,7 +136,6 @@ export namespace Synthesizer {
                         if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_NONE) {
                             // NOTE : おそらくここで定義されているのがSUSTAIN_LEVEL
                             ret.EG2SustainLevel = Math.max(0, Math.min(100.0, cb.lScale / 10));
-                            console.warn('CONN_EG2_SUSTAIN_RESERVED', lart.offset, cb.lScale, getSecondsFromArt1Scale(cb.lScale), getSecondsFromArt1Scale(cb.lScale/10));
                             return;
                         }
                         break;
@@ -157,10 +148,6 @@ export namespace Synthesizer {
                     case DLS.ART1DESTINATION.CONN_EG2_SUSTAIN:
                         if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_NONE) {
                             ret.EG2ReservedTime = getSecondsFromArt1Scale(cb.lScale);
-                            console.warn('CONN_EG2_SUSTAIN_?', lart.offset, cb.lScale, getSecondsFromArt1Scale(cb.lScale), getSecondsFromArt1Scale(cb.lScale/10));
-                            if (cb.lScale !== 0) {
-                                console.error ("CONN_EG2_SUSTAIN_?", lart.offset, cb.lScale, cb.lScale / 65536, getSecondsFromArt1Scale(cb.lScale), getSecondsFromArt1Scale(cb.lScale/10));
-                            }
                             return;
                         }
                         break;
@@ -195,13 +182,11 @@ export namespace Synthesizer {
                         if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_KEYNUMBER) {
                             // NOTE: DLS仕様書にはあるがgm.dlsにはなさそう
                             ret.KeyNumberToPitch = Math.max(-1200, Math.min(1200, cb.lScale / 65536.0 / 10));
-                            console.error("KeyNumberToPitch", lart.offset, cb.lScale);
                             return;
                         }
                         if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_EG2) {
                             // EG2 Value to Pitch (max pitch delta)
                             ret.EG2ToPitch = Math.max(-1200, Math.min(1200, cb.lScale / 65536.0 / 10));
-                            console.log("EG2ToPitch", cb.lScale, cb.lScale / 65536, getSecondsFromArt1Scale(cb.lScale), ret.EG2ToPitch);
                             return;
                         }
                         break;
@@ -214,11 +199,8 @@ export namespace Synthesizer {
                         }
                 }
                 console.warn('Unknown ART1 Destination', cb);
-            })
-        })
-        if (ret.EG2SustainLevel !== 0) {
-            console.error(ret.EG2SustainLevel, ret.EG2ReservedTime, ret.EG2ReleaseTime,ret, lart);
-        }
+            });
+        });
         return ret;
     }
 
@@ -409,16 +391,14 @@ export namespace Synthesizer {
                                 console.warn("not implemented about time cent!", mtrkEvent.event.value1);
                             }
                         } else if (mtrkEvent.event.controlCommand === 91) {
-                            // Reverb
+                            // Reverb (実装済み)
                             if (mtrkEvent.event.value1 !== 0) {
                                 channelInfo.reverbLevel = mtrkEvent.event.value1;
-                                console.warn("not implemented REVERB", mtrkEvent.event.value1)
                             }
                         } else if (mtrkEvent.event.controlCommand === 93) {
-                            // Chorus
+                            // Chorus (実装済み)
                             if (mtrkEvent.event.value1 !== 0) {
                                 channelInfo.chorusLevel = mtrkEvent.event.value1;
-                                console.warn("not implemented Chorus", mtrkEvent.event.value1)
                             }
                         } else if (mtrkEvent.event.controlCommand === 94) {
                             // Delay(GS) / Variety(XG)
@@ -510,7 +490,7 @@ export namespace Synthesizer {
                 tempo = tempoEvent;
             }
             offset += (1 / notePerTick) * (tempo / 1000000) * 44100;
-            if (tempoEvent) console.log(tick, tempo, offset);
+            // if (tempoEvent) console.log(tick, tempo, offset);
             tickToOffset.set(tick, offset);
             maxOffset = Math.max(maxOffset, offset);
         }
