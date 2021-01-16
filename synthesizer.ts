@@ -978,12 +978,12 @@ export namespace Synthesizer {
                             let panAttenuationL = 0;
                             if (channelInfo.pan !== undefined) {
                                 const pan = channelInfo.pan;
-                                panAttenuationR = -Math.min(96, 20 * Math.log10(Math.sin(Math.PI / 2 * pan / 127)));
-                                panAttenuationL = -Math.min(96, 20 * Math.log10(Math.cos(Math.PI / 2 * pan / 127)));
+                                panAttenuationR = -Math.min(96, 20 * Math.log10(Math.cos(Math.PI / 2 * pan / 127)));
+                                panAttenuationL = -Math.min(96, 20 * Math.log10(Math.sin(Math.PI / 2 * pan / 127)));
                             } else if (art1Info.Pan !== 0) {
                                 const pan = 64 - art1Info.Pan / 50 * 64;
-                                panAttenuationR = -Math.min(96, 20 * Math.log10(Math.sin(Math.PI / 2 * pan / 127)));
-                                panAttenuationL = -Math.min(96, 20 * Math.log10(Math.cos(Math.PI / 2 * pan / 127)));
+                                panAttenuationR = -Math.min(96, 20 * Math.log10(Math.cos(Math.PI / 2 * pan / 127)));
+                                panAttenuationL = -Math.min(96, 20 * Math.log10(Math.sin(Math.PI / 2 * pan / 127)));
                             }
                             // if (offset % 1000000 === 1) console.log(offset, channelID, eg1Attenuation, lfoAttenuation, wsmpAttenuation, wsmpAttenuation, 127 - 10 ** ((wsmpAttenuation*40 + lfoAttenuation)), 20 * Math.log10((127**2)-(eg1Attenuation**2)), 0.1 ** ((eg1Attenuation + lfoAttenuation + wsmpAttenuation) / 20));
                             // if (offset % 1000000 === 0) console.log(offset, channelID, art1Info.LFOFrequency, art1Info.LFOToVolume, art1Info.LFOToPitch, art1Info.LFODelay, lfo);
