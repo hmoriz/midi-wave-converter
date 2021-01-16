@@ -335,7 +335,7 @@ export namespace Synthesizer {
         }
     }
 
-    export async function synthesizeMIDI(midi : MidiParseInfo, dls : DLSParseInfo, bitRate : number = defaultBitRate, callback : (result: SynthesizeResult) => void) {
+    export async function synthesizeMIDI(midi : MidiParseInfo, dls : DLSParseInfo, bitRate : number = defaultBitRate) : Promise<SynthesizeResult> {
 
         // rgn offset(number) -> art1Info(for rgn)
         const lartOffsetToArt1InfoMap = new Map<number, Art1Info>();
@@ -637,464 +637,437 @@ export namespace Synthesizer {
         // channeiID -> [waveDataMin, waveDataMax]
         const channelWaveDataMaxMin = new Map<number, [number, number]>();
 
-        const processPartialMakeWaveSegment = async (startOffset : number, endOffset : number, allendCallback : Function) : Promise<void> => {
-            console.log("Synthesize Processing...", startOffset, "/", Math.ceil(maxOffset));
-            // TODO : 本当はこのファイルにdocumentを使うべきでない
-            if (document) {
-                document.getElementById('loading').innerText = `Synthesize Processing...${startOffset} / ${Math.ceil(maxOffset)}`;
-            }
-            for (let offset = startOffset; offset < Math.min(endOffset, maxOffset); offset++) {
-                waveDataR[offset] = 0;
-                waveDataL[offset] = 0;
-                
-                channelIDs.forEach((channelID) => {
-                    channelWaveDatas.get(channelID)[0][offset] = 0;
-                    channelWaveDatas.get(channelID)[1][offset] = 0;
-                    // if (channelID !== 0) return; // 仮置
-                    const channelEvent = offsetChannelInfoMap.get(channelID)?.get(offset);
-                    if (channelEvent) {
-                        /** @ts-ignore  */
-                        const channelInfoData = dls.instrumentIDMap.get(channelEvent.instrumentID)?.get(channelID === 9 ? 2147483648 : channelEvent.bankID);
-                        const art1Info = getArt1InfoFromLarts(channelInfoData.insChunk.lart);
-                        channelInfoMap.set(channelID, [channelEvent, channelInfoData, art1Info, channelInfoData.insChunk.lart]);
+        const processPartialMakeWaveSegment = (startOffset : number, endOffset : number) : Promise<void> => {
+            return new Promise<void>((done) => {
+                const processPartialMakeWaveSegment2 = (startOffset: number, endOffset : number) => {
+                    console.log("Synthesize Processing...", startOffset, "/", Math.ceil(maxOffset));
+                    // TODO : 本当はこのファイルにdocumentを使うべきでない
+                    if (document) {
+                        document.getElementById('loading').innerText = `Synthesize Processing...${startOffset} / ${Math.ceil(maxOffset)}`;
                     }
-                    const noteEvents = offsetNotesMap.get(channelID)?.get(offset);
-                    if (noteEvents) {
-                        noteEvents.forEach(noteEvent => {
-                            channelIDAttackingNoteMap.get(channelID).push([offset, noteEvent, 0, 0]);
-                        })
-                    }
-                    const pitchBendEventMap = offsetPitchBendMap.get(channelID);
-                    if (pitchBendEventMap && pitchBendEventMap.has(offset)) {
-                        const pitchBendEvent =  pitchBendEventMap.get(offset);
-                        pitchBendMap.set(channelID, pitchBendEvent);
-                    }
-    
-                    // 現在Onになっているノートに対してサンプルを収集しwaveDataに格納してく
-                    let attackingNotes = channelIDAttackingNoteMap.get(channelID);
-                    if (attackingNotes.length >= 1) {
-                        const channelData = channelInfoMap.get(channelID);
-                        let channelInfo : ChannelInfo;
-                        let instrumentData : InstrumentData;
-                        let art1Info       : Art1Info;
-                        let lart           : DLS.LartChunk;
-                        if (channelData) {
-                            [channelInfo, instrumentData, art1Info, lart] = channelInfoMap.get(channelID);
-                        }
-                        attackingNotes.forEach((attackingNoteData, arrayIndex) => {
-                            if (!channelData) return;
-                            if (!attackingNoteData) return;
-                            const [attackedOffset, noteInfo, sampleOffsetSpeedGain, lastSampleOffset] = attackingNoteData;
-                            const noteID = noteInfo.noteID;
-                            const position = offset - attackedOffset;
-                            const positionFromReleased = offset - noteInfo.endOffset;
-                            const sec = position / bitRate;
-                            const secFromReleased = positionFromReleased / bitRate;
-                            const rgn = instrumentData.insChunk.lrgn.rgnList.find(rgn => {
-                                return rgn.rgnh.rangeKey.usLow <= noteID && 
-                                    noteID <= rgn.rgnh.rangeKey.usHigh &&
-                                    rgn.rgnh.rangeVelocity.usLow <= noteInfo.velocity &&
-                                    noteInfo.velocity <=  rgn.rgnh.rangeVelocity.usHigh;
-                            });
-                            if (!rgn) {
-                                // rgnが存在しないなどないはず
-                                console.error("not defined RGN", noteID, noteInfo.velocity, instrumentData.insChunk.lrgn.rgnList);
-                                attackingNotes[arrayIndex] = null;
-                                return;
+                    for (let offset = startOffset; offset < Math.min(endOffset, maxOffset); offset++) {
+                        waveDataR[offset] = 0;
+                        waveDataL[offset] = 0;
+                        
+                        channelIDs.forEach((channelID) => {
+                            channelWaveDatas.get(channelID)[0][offset] = 0;
+                            channelWaveDatas.get(channelID)[1][offset] = 0;
+                            // if (channelID !== 0) return; // 仮置
+                            const channelEvent = offsetChannelInfoMap.get(channelID)?.get(offset);
+                            if (channelEvent) {
+                                /** @ts-ignore  */
+                                const channelInfoData = dls.instrumentIDMap.get(channelEvent.instrumentID)?.get(channelID === 9 ? 2147483648 : channelEvent.bankID);
+                                const art1Info = getArt1InfoFromLarts(channelInfoData.insChunk.lart);
+                                channelInfoMap.set(channelID, [channelEvent, channelInfoData, art1Info, channelInfoData.insChunk.lart]);
                             }
-                            if (!lart && rgn.lart) {
-                                // ins直属のlartが存在しない -> regionごとのlartのほうを取得(with cache)
-                                art1Info = getArt1InfoFromLarts(rgn.lart);
-                            } else if (!lart && !rgn.lart) {
-                                // TODO: 一応このケースも想定する必要あり(gm.dlsにはない)
-                                console.error("no ins lart nor rgn lart", channelInfo.instrumentID, rgn);
-                                return;
+                            const noteEvents = offsetNotesMap.get(channelID)?.get(offset);
+                            if (noteEvents) {
+                                noteEvents.forEach(noteEvent => {
+                                    channelIDAttackingNoteMap.get(channelID).push([offset, noteEvent, 0, 0]);
+                                })
                             }
-                            if (secFromReleased >= art1Info.EG1ReleaseTime) {
-                                // ノートオフ かつリリース時間を超えているので配列から雑に削除
-                                attackingNotes[arrayIndex] = null;
-                                return;
-                            } else {
-                                const waveChunk = instrumentData.waves.get(rgn.wlnk.ulTableIndex);
-                                if (!waveChunk) {
-                                    // 音源が不在(普通はないはず)
-                                    console.error("cannot load waveInfo from ", rgn);
-                                    attackingNotes[arrayIndex] = null;
-                                    return;
+                            const pitchBendEventMap = offsetPitchBendMap.get(channelID);
+                            if (pitchBendEventMap && pitchBendEventMap.has(offset)) {
+                                const pitchBendEvent =  pitchBendEventMap.get(offset);
+                                pitchBendMap.set(channelID, pitchBendEvent);
+                            }
+            
+                            // 現在Onになっているノートに対してサンプルを収集しwaveDataに格納してく
+                            let attackingNotes = channelIDAttackingNoteMap.get(channelID);
+                            if (attackingNotes.length >= 1) {
+                                const channelData = channelInfoMap.get(channelID);
+                                let channelInfo : ChannelInfo;
+                                let instrumentData : InstrumentData;
+                                let art1Info       : Art1Info;
+                                let lart           : DLS.LartChunk;
+                                if (channelData) {
+                                    [channelInfo, instrumentData, art1Info, lart] = channelInfoMap.get(channelID);
                                 }
-                                const bps = waveChunk.bytesPerSecond;
-                                const sampleOffsetDefaultSpeed = bps / bitRate;
-                                const wsmp = rgn.wsmp || waveChunk.wsmpChunk;
-                                let baseFrequency = 0;
-                                let waveLoopStart = 0;
-                                let waveLoopLength = 0;
-                                let waveLooping = false;
-                                let freqRate = 1;
-                                if (wsmp) {
-                                    let unityNote = wsmp.usUnityNote;
-                                    if (channelInfo.instrumentID >= 113) {
-                                        // NOTE: どうもそうっぽいので
-                                        unityNote = 60;
+                                attackingNotes.forEach((attackingNoteData, arrayIndex) => {
+                                    if (!channelData) return;
+                                    if (!attackingNoteData) return;
+                                    const [attackedOffset, noteInfo, sampleOffsetSpeedGain, lastSampleOffset] = attackingNoteData;
+                                    const noteID = noteInfo.noteID;
+                                    const position = offset - attackedOffset;
+                                    const positionFromReleased = offset - noteInfo.endOffset;
+                                    const sec = position / bitRate;
+                                    const secFromReleased = positionFromReleased / bitRate;
+                                    const rgn = instrumentData.insChunk.lrgn.rgnList.find(rgn => {
+                                        return rgn.rgnh.rangeKey.usLow <= noteID && 
+                                            noteID <= rgn.rgnh.rangeKey.usHigh &&
+                                            rgn.rgnh.rangeVelocity.usLow <= noteInfo.velocity &&
+                                            noteInfo.velocity <=  rgn.rgnh.rangeVelocity.usHigh;
+                                    });
+                                    if (!rgn) {
+                                        // rgnが存在しないなどないはず
+                                        console.error("not defined RGN", noteID, noteInfo.velocity, instrumentData.insChunk.lrgn.rgnList);
+                                        attackingNotes[arrayIndex] = null;
+                                        return;
                                     }
-                                    baseFrequency = Util.getFrequencyFromNoteID(unityNote);
-                                    const altFreq = Util.getFrequencyFromNoteID(noteID);
-                                    freqRate = altFreq / baseFrequency;
-                                    if (wsmp.waveSampleLoop) {
-                                        waveLooping = true;
-                                        waveLoopStart = wsmp.waveSampleLoop.ulLoopStart;
-                                        waveLoopLength = wsmp.waveSampleLoop.ulLoopLength;
+                                    if (!lart && rgn.lart) {
+                                        // ins直属のlartが存在しない -> regionごとのlartのほうを取得(with cache)
+                                        art1Info = getArt1InfoFromLarts(rgn.lart);
+                                    } else if (!lart && !rgn.lart) {
+                                        // TODO: 一応このケースも想定する必要あり(gm.dlsにはない)
+                                        console.error("no ins lart nor rgn lart", channelInfo.instrumentID, rgn);
+                                        return;
                                     }
-                                }
-                                // EG2(Envelope Generator for Pitch)情報をpositionDXに雑に適用
-                                let nextSampleOffsetSpeedGain = sampleOffsetSpeedGain;
-                                if (position >= 1 && art1Info) {
-                                    let sampleOffsetSpeedCents = 0;
-                                    let eg2PitchCents = 0;
-                                    if (art1Info.EG2ToPitch !== 0) {
-                                        const attackTime = getEG2AttackTimeFromArt1Info(art1Info, noteInfo.velocity);
-                                        const decayTime = getEG2DecayTimeFromArt1Info(art1Info, noteInfo.noteID);
-                                        if (sec < attackTime) {
-                                            // Attack Zone
-                                            if (sec === 0) {
-                                                eg2PitchCents = 0
-                                            } else {
-                                                eg2PitchCents = art1Info.EG2ToPitch * sec / attackTime;
-                                            }
-                                        } else if (positionFromReleased <= 0) {
-                                            // Decay or Sustain Zone
-                                            if (sec === 0 || art1Info.EG2DecayTime === 0) {
-                                                eg2PitchCents = 0;
-                                            } else {
-                                                if (sec === attackTime) {
-                                                    eg2PitchCents = art1Info.EG2ToPitch;
-                                                } else {
-                                                    eg2PitchCents = art1Info.EG2ToPitch - art1Info.EG2ToPitch * Math.min(1, (sec - attackTime) / decayTime);
-                                                }
-                                            }
-                                            eg2PitchCents = art1Info.EG2ToPitch > 0 ? 
-                                                Math.max(eg2PitchCents, art1Info.EG2ToPitch * art1Info.EG2SustainLevel / 100.0) : 
-                                                Math.min(eg2PitchCents, art1Info.EG2ToPitch * art1Info.EG2SustainLevel / 100.0);
-                                        } else {
-                                            // Sustain or Release Zone
-                                            let dddx = art1Info.EG2ToPitch;
-                                            if (sec === 0 || art1Info.EG2DecayTime === 0) {
-                                                dddx = 0;
-                                            } else {
-                                                if (sec !== attackTime) {
-                                                    dddx = art1Info.EG2ToPitch -  art1Info.EG2ToPitch * Math.min(1, (sec - attackTime) / decayTime);
-                                                }
-                                            }
-                                            dddx = art1Info.EG2ToPitch > 0 ? 
-                                                Math.max(dddx, art1Info.EG2ToPitch * art1Info.EG2SustainLevel / 100.0) :
-                                                Math.min(dddx, art1Info.EG2ToPitch * art1Info.EG2SustainLevel / 100.0);
-                                            if (art1Info.EG2ReleaseTime === 0) {
-                                                eg2PitchCents = 0;
-                                            } else {
-                                                if (noteInfo.endOffset === offset) {
-                                                    eg2PitchCents = dddx;
-                                                } else {
-                                                    eg2PitchCents = art1Info.EG2ToPitch - art1Info.EG2ToPitch * Math.min(1, secFromReleased / (art1Info.EG2ReleaseTime));
-                                                }
-                                            }
-                                            eg2PitchCents = art1Info.EG2ToPitch > 0 ? 
-                                                Math.min(eg2PitchCents, dddx) : 
-                                                Math.max(eg2PitchCents, dddx);
-                                        }
-                                        // eg2PitchCents : cent単位
-                                        eg2PitchCents = Math.max(-1200, Math.min(1200, eg2PitchCents));
-                                    }
-                                    sampleOffsetSpeedCents += eg2PitchCents;
-                                    // LFO情報もpositionDXに適用 (cent単位)
-                                    let lfoPitchCents = 0;
-                                    if (art1Info.LFOToPitch !== 0 || art1Info.PitchPerModWheel !== 0) {
-                                        // 遅延が存在する場合は遅延時間以降でサインカーブを生成
-                                        // また, -50～50(DLSに設定が存在する場合は別)centでmodulationWheelを適用
-                                        if (sec >= art1Info.LFODelay) {
-                                            lfoPitchCents = Math.sin((sec - art1Info.LFODelay) * Math.PI * 2 * art1Info.LFOFrequency) * (art1Info.LFOToPitch + (art1Info.PitchPerModWheel || 50) * (channelInfo.modWheel / 128));
-                                        }
-                                        //if (channelInfo.modWheel > 0) console.log(channelID, offset, sec, art1Info.LFODelay, channelInfo.modWheel, lfo, art1Info.LFOToPitch, art1Info.PitchPerModWheel);
-                                    }
-                                    eg2PitchCents += lfoPitchCents;
-                                    if (wsmp) {
-                                        // sFineTune を加味 (NOTE : DLSの仕様では65536で割るべきっぽいけどgm.dlsのfineTuneの内容的に行わない)
-                                        sampleOffsetSpeedCents += wsmp.sFineTune;
-                                    }
-                                    // ピッチベンド Cent値適用 (-8192～8191の範囲で存在し, 最大6分の1オクターブ程度変更させる)
-                                    // TODO : RPN
-                                    let pitchBendCents = 0;
-                                    if (pitchBendMap.has(channelID)) {
-                                        const pitchBend = pitchBendMap.get(channelID);
-                                        pitchBendCents = pitchBend / 8192 * 1200 / 12 * (channelInfo?.pitchBendSensitivity || 2);
-                                    }
-                                    sampleOffsetSpeedCents += pitchBendCents;
-                                    // sampleOffsetSpeedGain : 増加率 (cent = 1200分の1オクターブとして計算)
-                                    nextSampleOffsetSpeedGain = (2 ** (sampleOffsetSpeedCents / 1200));
-                                    // if (sec > 2.0) console.log(offset, channelID, position, sec, pitchBendMap.get(channelID), lastSampleOffset, sampleOffsetSpeedGain, nextSampleOffsetSpeedGain, sampleOffsetSpeedCents, sampleOffsetDefaultSpeed, freqRate, wsmp?.sFineTune, lfoPitchCents, eg2PitchCents, art1Info);
-                                }
-                                // サンプル側の取得するべきオフセットを取得(ピッチによる変動を考慮済み)
-                                let sampleOffset = Math.max(0, (lastSampleOffset + sampleOffsetDefaultSpeed * freqRate * nextSampleOffsetSpeedGain));
-                                channelIDAttackingNoteMap.get(channelID)[arrayIndex] = [attackedOffset, noteInfo, nextSampleOffsetSpeedGain, sampleOffset];
-                                
-                                // サンプルwaveのループ部分
-                                if (waveLooping && sampleOffset >= (waveLoopStart + waveLoopLength)) {
-                                    sampleOffset = ((sampleOffset - (waveLoopStart + waveLoopLength)) % waveLoopLength) + waveLoopStart;
-                                } else if (!waveLooping && sampleOffset >= waveChunk.pcmData.length-1) {
-                                    // if (offset <= noteInfo.endOffset) {
-                                        // NOTE ONのうちにワンショット系の時間が過ぎているので一応警告
-                                        // console.warn("sampleOffset is out of BOUND", sampleOffset );
-                                    // }
-                                    attackingNotes[arrayIndex] = null;
-                                    return;
-                                }
-                                // TODO : 一旦「線形補間」
-                                let sampleWaveData = 0;
-                                if (Number.isInteger(sampleOffset)) {
-                                    sampleWaveData = waveChunk.pcmData[sampleOffset];
-                                } else {
-                                    const x1 = Math.trunc(sampleOffset);
-                                    const x2 = Math.ceil(sampleOffset);
-                                    const y1 = waveChunk.pcmData[x1];
-                                    const y2 = waveChunk.pcmData[x2];
-                                    sampleWaveData = (x2 - sampleOffset) * y1 + (sampleOffset - x1) * y2;
-                                }
-                                // EG1(Envelope Generator for Volume)情報を反映
-                                // NOTE : AttenuationはdB単位で取得し最後に雑に指数関数的に減衰させる
-                                let eg1Attenuation = 96;
-                                if (art1Info) {
-                                    const attackTime = getEG1AttackTimeFromArt1Info(art1Info, noteInfo.velocity);
-                                    const decayTime = getEG1DecayTimeFromArt1Info(art1Info, noteInfo.noteID);
-                                    if (sec < attackTime) {
-                                        // Attack Zone
-                                        eg1Attenuation = Math.min(96, sec === 0 ? 96 : 20 * Math.log10(attackTime / sec));
-                                    } else if (positionFromReleased <= 0) {
-                                        // Decay or Sustain Zone
-                                        if (sec === 0 || decayTime === 0) {
-                                            eg1Attenuation = 96;
-                                        } else {
-                                            if (sec === attackTime) {
-                                                eg1Attenuation = 0;
-                                            } else {
-                                                eg1Attenuation = 96 * (sec - attackTime) / decayTime;
-                                            }
-                                        }
-                                        eg1Attenuation = Math.min(eg1Attenuation, 96 * (1 - art1Info.EG1SustainLevel / 100.0));
+                                    if (secFromReleased >= art1Info.EG1ReleaseTime) {
+                                        // ノートオフ かつリリース時間を超えているので配列から雑に削除
+                                        attackingNotes[arrayIndex] = null;
+                                        return;
                                     } else {
-                                        // Sustain or Release Zone
-                                        let dAttenuation = 96;
-                                        if (sec === 0 || decayTime === 0) {
-                                            dAttenuation = 96;
-                                        } else {
-                                            if (sec === attackTime) {
-                                                dAttenuation = 0;
-                                            } else {
-                                                dAttenuation = 96 * (sec - attackTime) / decayTime;
+                                        const waveChunk = instrumentData.waves.get(rgn.wlnk.ulTableIndex);
+                                        if (!waveChunk) {
+                                            // 音源が不在(普通はないはず)
+                                            console.error("cannot load waveInfo from ", rgn);
+                                            attackingNotes[arrayIndex] = null;
+                                            return;
+                                        }
+                                        const bps = waveChunk.bytesPerSecond;
+                                        const sampleOffsetDefaultSpeed = bps / bitRate;
+                                        const wsmp = rgn.wsmp || waveChunk.wsmpChunk;
+                                        let baseFrequency = 0;
+                                        let waveLoopStart = 0;
+                                        let waveLoopLength = 0;
+                                        let waveLooping = false;
+                                        let freqRate = 1;
+                                        if (wsmp) {
+                                            let unityNote = wsmp.usUnityNote;
+                                            if (channelInfo.instrumentID >= 113) {
+                                                // NOTE: どうもそうっぽいので
+                                                unityNote = 60;
+                                            }
+                                            baseFrequency = Util.getFrequencyFromNoteID(unityNote);
+                                            const altFreq = Util.getFrequencyFromNoteID(noteID);
+                                            freqRate = altFreq / baseFrequency;
+                                            if (wsmp.waveSampleLoop) {
+                                                waveLooping = true;
+                                                waveLoopStart = wsmp.waveSampleLoop.ulLoopStart;
+                                                waveLoopLength = wsmp.waveSampleLoop.ulLoopLength;
                                             }
                                         }
-                                        dAttenuation = Math.min(dAttenuation, 96 * (1 - art1Info.EG1SustainLevel / 100.0));
-                                        if (art1Info.EG1ReleaseTime === 0) {
-                                            eg1Attenuation = 96;
-                                        } else {
-                                            if (offset === noteInfo.endOffset) {
-                                                eg1Attenuation = dAttenuation;
-                                            } else {
-                                                eg1Attenuation = 96 * secFromReleased / art1Info.EG1ReleaseTime;
+                                        // EG2(Envelope Generator for Pitch)情報をpositionDXに雑に適用
+                                        let nextSampleOffsetSpeedGain = sampleOffsetSpeedGain;
+                                        if (position >= 1 && art1Info) {
+                                            let sampleOffsetSpeedCents = 0;
+                                            let eg2PitchCents = 0;
+                                            if (art1Info.EG2ToPitch !== 0) {
+                                                const attackTime = getEG2AttackTimeFromArt1Info(art1Info, noteInfo.velocity);
+                                                const decayTime = getEG2DecayTimeFromArt1Info(art1Info, noteInfo.noteID);
+                                                if (sec < attackTime) {
+                                                    // Attack Zone
+                                                    if (sec === 0) {
+                                                        eg2PitchCents = 0
+                                                    } else {
+                                                        eg2PitchCents = art1Info.EG2ToPitch * sec / attackTime;
+                                                    }
+                                                } else if (positionFromReleased <= 0) {
+                                                    // Decay or Sustain Zone
+                                                    if (sec === 0 || art1Info.EG2DecayTime === 0) {
+                                                        eg2PitchCents = 0;
+                                                    } else {
+                                                        if (sec === attackTime) {
+                                                            eg2PitchCents = art1Info.EG2ToPitch;
+                                                        } else {
+                                                            eg2PitchCents = art1Info.EG2ToPitch - art1Info.EG2ToPitch * Math.min(1, (sec - attackTime) / decayTime);
+                                                        }
+                                                    }
+                                                    eg2PitchCents = art1Info.EG2ToPitch > 0 ? 
+                                                        Math.max(eg2PitchCents, art1Info.EG2ToPitch * art1Info.EG2SustainLevel / 100.0) : 
+                                                        Math.min(eg2PitchCents, art1Info.EG2ToPitch * art1Info.EG2SustainLevel / 100.0);
+                                                } else {
+                                                    // Sustain or Release Zone
+                                                    let dddx = art1Info.EG2ToPitch;
+                                                    if (sec === 0 || art1Info.EG2DecayTime === 0) {
+                                                        dddx = 0;
+                                                    } else {
+                                                        if (sec !== attackTime) {
+                                                            dddx = art1Info.EG2ToPitch -  art1Info.EG2ToPitch * Math.min(1, (sec - attackTime) / decayTime);
+                                                        }
+                                                    }
+                                                    dddx = art1Info.EG2ToPitch > 0 ? 
+                                                        Math.max(dddx, art1Info.EG2ToPitch * art1Info.EG2SustainLevel / 100.0) :
+                                                        Math.min(dddx, art1Info.EG2ToPitch * art1Info.EG2SustainLevel / 100.0);
+                                                    if (art1Info.EG2ReleaseTime === 0) {
+                                                        eg2PitchCents = 0;
+                                                    } else {
+                                                        if (noteInfo.endOffset === offset) {
+                                                            eg2PitchCents = dddx;
+                                                        } else {
+                                                            eg2PitchCents = art1Info.EG2ToPitch - art1Info.EG2ToPitch * Math.min(1, secFromReleased / (art1Info.EG2ReleaseTime));
+                                                        }
+                                                    }
+                                                    eg2PitchCents = art1Info.EG2ToPitch > 0 ? 
+                                                        Math.min(eg2PitchCents, dddx) : 
+                                                        Math.max(eg2PitchCents, dddx);
+                                                }
+                                                // eg2PitchCents : cent単位
+                                                eg2PitchCents = Math.max(-1200, Math.min(1200, eg2PitchCents));
                                             }
+                                            sampleOffsetSpeedCents += eg2PitchCents;
+                                            // LFO情報もpositionDXに適用 (cent単位)
+                                            let lfoPitchCents = 0;
+                                            if (art1Info.LFOToPitch !== 0 || art1Info.PitchPerModWheel !== 0) {
+                                                // 遅延が存在する場合は遅延時間以降でサインカーブを生成
+                                                // また, -50～50(DLSに設定が存在する場合は別)centでmodulationWheelを適用
+                                                if (sec >= art1Info.LFODelay) {
+                                                    lfoPitchCents = Math.sin((sec - art1Info.LFODelay) * Math.PI * 2 * art1Info.LFOFrequency) * (art1Info.LFOToPitch + (art1Info.PitchPerModWheel || 50) * (channelInfo.modWheel / 128));
+                                                }
+                                                //if (channelInfo.modWheel > 0) console.log(channelID, offset, sec, art1Info.LFODelay, channelInfo.modWheel, lfo, art1Info.LFOToPitch, art1Info.PitchPerModWheel);
+                                            }
+                                            eg2PitchCents += lfoPitchCents;
+                                            if (wsmp) {
+                                                // sFineTune を加味 (NOTE : DLSの仕様では65536で割るべきっぽいけどgm.dlsのfineTuneの内容的に行わない)
+                                                sampleOffsetSpeedCents += wsmp.sFineTune;
+                                            }
+                                            // ピッチベンド Cent値適用 (-8192～8191の範囲で存在し, 最大6分の1オクターブ程度変更させる)
+                                            // TODO : RPN
+                                            let pitchBendCents = 0;
+                                            if (pitchBendMap.has(channelID)) {
+                                                const pitchBend = pitchBendMap.get(channelID);
+                                                pitchBendCents = pitchBend / 8192 * 1200 / 12 * (channelInfo?.pitchBendSensitivity || 2);
+                                            }
+                                            sampleOffsetSpeedCents += pitchBendCents;
+                                            // sampleOffsetSpeedGain : 増加率 (cent = 1200分の1オクターブとして計算)
+                                            nextSampleOffsetSpeedGain = (2 ** (sampleOffsetSpeedCents / 1200));
+                                            // if (sec > 2.0) console.log(offset, channelID, position, sec, pitchBendMap.get(channelID), lastSampleOffset, sampleOffsetSpeedGain, nextSampleOffsetSpeedGain, sampleOffsetSpeedCents, sampleOffsetDefaultSpeed, freqRate, wsmp?.sFineTune, lfoPitchCents, eg2PitchCents, art1Info);
                                         }
-                                        if (noteInfo.notEnds) {
-                                            // 次のノートが迫っているパターンのため, Attenuationを加速させる
-                                            eg1Attenuation *= 2;
+                                        // サンプル側の取得するべきオフセットを取得(ピッチによる変動を考慮済み)
+                                        let sampleOffset = Math.max(0, (lastSampleOffset + sampleOffsetDefaultSpeed * freqRate * nextSampleOffsetSpeedGain));
+                                        channelIDAttackingNoteMap.get(channelID)[arrayIndex] = [attackedOffset, noteInfo, nextSampleOffsetSpeedGain, sampleOffset];
+                                        
+                                        // サンプルwaveのループ部分
+                                        if (waveLooping && sampleOffset >= (waveLoopStart + waveLoopLength)) {
+                                            sampleOffset = ((sampleOffset - (waveLoopStart + waveLoopLength)) % waveLoopLength) + waveLoopStart;
+                                        } else if (!waveLooping && sampleOffset >= waveChunk.pcmData.length-1) {
+                                            // if (offset <= noteInfo.endOffset) {
+                                                // NOTE ONのうちにワンショット系の時間が過ぎているので一応警告
+                                                // console.warn("sampleOffset is out of BOUND", sampleOffset );
+                                            // }
+                                            attackingNotes[arrayIndex] = null;
+                                            return;
                                         }
-                                        eg1Attenuation = Math.max(eg1Attenuation, dAttenuation);
+                                        // TODO : 一旦「線形補間」
+                                        let sampleWaveData = 0;
+                                        if (Number.isInteger(sampleOffset)) {
+                                            sampleWaveData = waveChunk.pcmData[sampleOffset];
+                                        } else {
+                                            const x1 = Math.trunc(sampleOffset);
+                                            const x2 = Math.ceil(sampleOffset);
+                                            const y1 = waveChunk.pcmData[x1];
+                                            const y2 = waveChunk.pcmData[x2];
+                                            sampleWaveData = (x2 - sampleOffset) * y1 + (sampleOffset - x1) * y2;
+                                        }
+                                        // EG1(Envelope Generator for Volume)情報を反映
+                                        // NOTE : AttenuationはdB単位で取得し最後に雑に指数関数的に減衰させる
+                                        let eg1Attenuation = 96;
+                                        if (art1Info) {
+                                            const attackTime = getEG1AttackTimeFromArt1Info(art1Info, noteInfo.velocity);
+                                            const decayTime = getEG1DecayTimeFromArt1Info(art1Info, noteInfo.noteID);
+                                            if (sec < attackTime) {
+                                                // Attack Zone
+                                                eg1Attenuation = Math.min(96, sec === 0 ? 96 : 20 * Math.log10(attackTime / sec));
+                                            } else if (positionFromReleased <= 0) {
+                                                // Decay or Sustain Zone
+                                                if (sec === 0 || decayTime === 0) {
+                                                    eg1Attenuation = 96;
+                                                } else {
+                                                    if (sec === attackTime) {
+                                                        eg1Attenuation = 0;
+                                                    } else {
+                                                        eg1Attenuation = 96 * (sec - attackTime) / decayTime;
+                                                    }
+                                                }
+                                                eg1Attenuation = Math.min(eg1Attenuation, 96 * (1 - art1Info.EG1SustainLevel / 100.0));
+                                            } else {
+                                                // Sustain or Release Zone
+                                                let dAttenuation = 96;
+                                                if (sec === 0 || decayTime === 0) {
+                                                    dAttenuation = 96;
+                                                } else {
+                                                    if (sec === attackTime) {
+                                                        dAttenuation = 0;
+                                                    } else {
+                                                        dAttenuation = 96 * (sec - attackTime) / decayTime;
+                                                    }
+                                                }
+                                                dAttenuation = Math.min(dAttenuation, 96 * (1 - art1Info.EG1SustainLevel / 100.0));
+                                                if (art1Info.EG1ReleaseTime === 0) {
+                                                    eg1Attenuation = 96;
+                                                } else {
+                                                    if (offset === noteInfo.endOffset) {
+                                                        eg1Attenuation = dAttenuation;
+                                                    } else {
+                                                        eg1Attenuation = 96 * secFromReleased / art1Info.EG1ReleaseTime;
+                                                    }
+                                                }
+                                                if (noteInfo.notEnds) {
+                                                    // 次のノートが迫っているパターンのため, Attenuationを加速させる
+                                                    eg1Attenuation *= 2;
+                                                }
+                                                eg1Attenuation = Math.max(eg1Attenuation, dAttenuation);
+                                            }
+                                            eg1Attenuation = Math.min(96, Math.max(0, eg1Attenuation));
+                                            // if (positionFromReleased === -1 || positionFromReleased === 0 || positionFromReleased === 1) console.log(offset, channelID, noteID, noteInfo.endOffset, noteInfo.length, position, sec, secFromReleased, sec <= attackTime, positionFromReleased <= 0, eg1Velocity, eg1Attenuation, dAttenuation, attackTime, art1Info.EG1AttackTime, art1Info.EG1VelocityToAttack);
+                                        }
+                                        // LFO情報を反映
+                                        let lfo = 0;
+                                        let lfoAttenuation = 0;
+                                        if (art1Info) {
+                                            if (art1Info.LFOToVolume > 0) {
+                                                // 遅延が存在する場合は遅延時間以降でサインカーブを生成
+                                                if (sec >= art1Info.LFODelay) {
+                                                    lfo = Math.sin((sec - art1Info.LFODelay) * Math.PI * 2 * art1Info.LFOFrequency) * art1Info.LFOToVolume;
+                                                    lfoAttenuation = lfo;
+                                                }
+                                            } 
+                                        }
+                                        // WSMPのAttenuation考慮(NOTE: dB値を減衰ではなく増加させる方向で)
+                                        let wsmpAttenuation = 0;
+                                        if (wsmp) {
+                                            if (wsmpAttenuation === 0x80000000) {
+                                                sampleWaveData = 0;
+                                            }
+                                            wsmpAttenuation = -wsmp.lAttenuation / 655360;
+                                        }
+                                        let sampleWaveDataR = sampleWaveData;
+                                        let sampleWaveDataL = sampleWaveData;
+                                        // Velocity Attenuation
+                                        let velocityAttenuation = Math.min(96, 20 * Math.log10(127 / noteInfo.velocity));
+                                        // Volume Attenuation
+                                        let volumeAttenuation = 0;
+                                        if (channelInfo) {
+                                            volumeAttenuation = Math.min(96, 20 * Math.log10((127 ** 2) / (channelInfo.volume ** 2)));
+                                        }
+                                        // Expression Attenuation
+                                        let expressionAttenuation = 0;
+                                        if (channelInfo) {
+                                            expressionAttenuation = Math.min(96, 20 * Math.log10((127 ** 2) / (channelInfo.expression ** 2)));
+                                        }
+                                        // PAN考慮
+                                        let panAttenuationR = 0;
+                                        let panAttenuationL = 0;
+                                        if (channelInfo.pan !== undefined) {
+                                            const pan = channelInfo.pan;
+                                            panAttenuationR = -Math.min(96, 20 * Math.log10(Math.cos(Math.PI / 2 * pan / 127)));
+                                            panAttenuationL = -Math.min(96, 20 * Math.log10(Math.sin(Math.PI / 2 * pan / 127)));
+                                        } else if (art1Info.Pan !== 0) {
+                                            const pan = 64 - art1Info.Pan / 50 * 64;
+                                            panAttenuationR = -Math.min(96, 20 * Math.log10(Math.cos(Math.PI / 2 * pan / 127)));
+                                            panAttenuationL = -Math.min(96, 20 * Math.log10(Math.sin(Math.PI / 2 * pan / 127)));
+                                        }
+                                        // if (offset % 1000000 === 1) console.log(offset, channelID, eg1Attenuation, lfoAttenuation, wsmpAttenuation, wsmpAttenuation, 127 - 10 ** ((wsmpAttenuation*40 + lfoAttenuation)), 20 * Math.log10((127**2)-(eg1Attenuation**2)), 0.1 ** ((eg1Attenuation + lfoAttenuation + wsmpAttenuation) / 20));
+                                        // if (offset % 1000000 === 0) console.log(offset, channelID, art1Info.LFOFrequency, art1Info.LFOToVolume, art1Info.LFOToPitch, art1Info.LFODelay, lfo);
+                                        sampleWaveDataR = (sampleWaveData * (0.1 ** ((Math.max(0, eg1Attenuation + velocityAttenuation + wsmpAttenuation + lfoAttenuation + volumeAttenuation + expressionAttenuation + panAttenuationR)) / 20)));
+                                        sampleWaveDataL = (sampleWaveData * (0.1 ** ((Math.max(0, eg1Attenuation + velocityAttenuation +  wsmpAttenuation + lfoAttenuation + volumeAttenuation + expressionAttenuation + panAttenuationL)) / 20)));
+                                        if (isNaN(sampleWaveData)) {
+                                            console.error(channelID, offset, lfo, sampleOffset, sampleWaveData, art1Info.EG1ReleaseTime, channelInfo.volume);
+                                        }
+                                        waveDataR[offset] += sampleWaveDataR;
+                                        waveDataL[offset] += sampleWaveDataL;
+                                        channelWaveDatas.get(channelID)[0][offset] += sampleWaveDataR;
+                                        channelWaveDatas.get(channelID)[1][offset] += sampleWaveDataL;
+                                        // console.log(offset, attackedOffset, noteInfo, positionDX, art1Info, wsmp, position, sampleOffset, freqRate, sampleWaveData, eg1Velocity, waveLoopLength, waveLoopStart, waveInfo.wave.pcmData.length);
+                                        if (sec >= 1 && eg1Attenuation + velocityAttenuation + wsmpAttenuation + lfoAttenuation + volumeAttenuation + expressionAttenuation >= 96) {
+                                            // なり始めてから時間がそれなりに経ち音量が下がりきってる -> 配列から除去(計算の対象外とする)
+                                            attackingNotes[arrayIndex] = null;
+                                        }
                                     }
-                                    eg1Attenuation = Math.min(96, Math.max(0, eg1Attenuation));
-                                    // if (positionFromReleased === -1 || positionFromReleased === 0 || positionFromReleased === 1) console.log(offset, channelID, noteID, noteInfo.endOffset, noteInfo.length, position, sec, secFromReleased, sec <= attackTime, positionFromReleased <= 0, eg1Velocity, eg1Attenuation, dAttenuation, attackTime, art1Info.EG1AttackTime, art1Info.EG1VelocityToAttack);
-                                }
-                                // LFO情報を反映
-                                let lfo = 0;
-                                let lfoAttenuation = 0;
-                                if (art1Info) {
-                                    if (art1Info.LFOToVolume > 0) {
-                                        // 遅延が存在する場合は遅延時間以降でサインカーブを生成
-                                        if (sec >= art1Info.LFODelay) {
-                                            lfo = Math.sin((sec - art1Info.LFODelay) * Math.PI * 2 * art1Info.LFOFrequency) * art1Info.LFOToVolume;
-                                            lfoAttenuation = lfo;
-                                        }
-                                    } 
-                                }
-                                // WSMPのAttenuation考慮(NOTE: dB値を減衰ではなく増加させる方向で)
-                                let wsmpAttenuation = 0;
-                                if (wsmp) {
-                                    if (wsmpAttenuation === 0x80000000) {
-                                        sampleWaveData = 0;
-                                    }
-                                    wsmpAttenuation = -wsmp.lAttenuation / 655360;
-                                }
-                                let sampleWaveDataR = sampleWaveData;
-                                let sampleWaveDataL = sampleWaveData;
-                                // Velocity Attenuation
-                                let velocityAttenuation = Math.min(96, 20 * Math.log10(127 / noteInfo.velocity));
-                                // Volume Attenuation
-                                let volumeAttenuation = 0;
-                                if (channelInfo) {
-                                    volumeAttenuation = Math.min(96, 20 * Math.log10((127 ** 2) / (channelInfo.volume ** 2)));
-                                }
-                                // Expression Attenuation
-                                let expressionAttenuation = 0;
-                                if (channelInfo) {
-                                    expressionAttenuation = Math.min(96, 20 * Math.log10((127 ** 2) / (channelInfo.expression ** 2)));
-                                }
-                                // PAN考慮
-                                let panAttenuationR = 0;
-                                let panAttenuationL = 0;
-                                if (channelInfo.pan !== undefined) {
-                                    const pan = channelInfo.pan;
-                                    panAttenuationR = -Math.min(96, 20 * Math.log10(Math.cos(Math.PI / 2 * pan / 127)));
-                                    panAttenuationL = -Math.min(96, 20 * Math.log10(Math.sin(Math.PI / 2 * pan / 127)));
-                                } else if (art1Info.Pan !== 0) {
-                                    const pan = 64 - art1Info.Pan / 50 * 64;
-                                    panAttenuationR = -Math.min(96, 20 * Math.log10(Math.cos(Math.PI / 2 * pan / 127)));
-                                    panAttenuationL = -Math.min(96, 20 * Math.log10(Math.sin(Math.PI / 2 * pan / 127)));
-                                }
-                                // if (offset % 1000000 === 1) console.log(offset, channelID, eg1Attenuation, lfoAttenuation, wsmpAttenuation, wsmpAttenuation, 127 - 10 ** ((wsmpAttenuation*40 + lfoAttenuation)), 20 * Math.log10((127**2)-(eg1Attenuation**2)), 0.1 ** ((eg1Attenuation + lfoAttenuation + wsmpAttenuation) / 20));
-                                // if (offset % 1000000 === 0) console.log(offset, channelID, art1Info.LFOFrequency, art1Info.LFOToVolume, art1Info.LFOToPitch, art1Info.LFODelay, lfo);
-                                sampleWaveDataR = (sampleWaveData * (0.1 ** ((Math.max(0, eg1Attenuation + velocityAttenuation + wsmpAttenuation + lfoAttenuation + volumeAttenuation + expressionAttenuation + panAttenuationR)) / 20)));
-                                sampleWaveDataL = (sampleWaveData * (0.1 ** ((Math.max(0, eg1Attenuation + velocityAttenuation +  wsmpAttenuation + lfoAttenuation + volumeAttenuation + expressionAttenuation + panAttenuationL)) / 20)));
-                                if (isNaN(sampleWaveData)) {
-                                    console.error(channelID, offset, lfo, sampleOffset, sampleWaveData, art1Info.EG1ReleaseTime, channelInfo.volume);
-                                }
-                                waveDataR[offset] += sampleWaveDataR;
-                                waveDataL[offset] += sampleWaveDataL;
-                                channelWaveDatas.get(channelID)[0][offset] += sampleWaveDataR;
-                                channelWaveDatas.get(channelID)[1][offset] += sampleWaveDataL;
-                                // console.log(offset, attackedOffset, noteInfo, positionDX, art1Info, wsmp, position, sampleOffset, freqRate, sampleWaveData, eg1Velocity, waveLoopLength, waveLoopStart, waveInfo.wave.pcmData.length);
-                                if (sec >= 1 && eg1Attenuation + velocityAttenuation + wsmpAttenuation + lfoAttenuation + volumeAttenuation + expressionAttenuation >= 96) {
-                                    // なり始めてから時間がそれなりに経ち音量が下がりきってる -> 配列から除去(計算の対象外とする)
-                                    attackingNotes[arrayIndex] = null;
-                                }
+                                });
+                            }
+                            // 消えたデータを除去
+                            channelIDAttackingNoteMap.set(channelID, attackingNotes.filter(data => !!data));
+            
+                            if (!channelWaveDataMaxMin.get(channelID)) {
+                                channelWaveDataMaxMin.set(channelID, [channelWaveDatas.get(channelID)[0][offset] || 1, channelWaveDatas.get(channelID)[0][offset] || -1]);
+                            } else {
+                                const [max, min] = channelWaveDataMaxMin.get(channelID);
+                                channelWaveDataMaxMin.set(channelID, [
+                                    Math.max(max, channelWaveDatas.get(channelID)[0][offset] || 1, channelWaveDatas.get(channelID)[1][offset] || 1), 
+                                    Math.min(min, channelWaveDatas.get(channelID)[0][offset] || -1, channelWaveDatas.get(channelID)[1][offset] || -1)
+                                ]);
                             }
                         });
+                        if (waveDataR[offset]) {
+                            waveDataRMax = Math.max(waveDataRMax, waveDataR[offset], waveDataL[offset]);
+                            waveDataRMin = Math.min(waveDataRMin, waveDataR[offset], waveDataL[offset]);
+                        }
                     }
-                    // 消えたデータを除去
-                    channelIDAttackingNoteMap.set(channelID, attackingNotes.filter(data => !!data));
-    
-                    if (!channelWaveDataMaxMin.get(channelID)) {
-                        channelWaveDataMaxMin.set(channelID, [channelWaveDatas.get(channelID)[0][offset] || 1, channelWaveDatas.get(channelID)[0][offset] || -1]);
+                    // NOTE : かなり雑なループなため, バグるかも
+                    if (endOffset < maxOffset) {
+                        setTimeout(() => {
+                            processPartialMakeWaveSegment2(endOffset, endOffset+(endOffset-startOffset));
+                        }, 10);
                     } else {
-                        const [max, min] = channelWaveDataMaxMin.get(channelID);
-                        channelWaveDataMaxMin.set(channelID, [
-                            Math.max(max, channelWaveDatas.get(channelID)[0][offset] || 1, channelWaveDatas.get(channelID)[1][offset] || 1), 
-                            Math.min(min, channelWaveDatas.get(channelID)[0][offset] || -1, channelWaveDatas.get(channelID)[1][offset] || -1)
-                        ]);
+                        console.log("processPartialMakeWaveSegment done!");
+                        done();
                     }
-                });
-                if (waveDataR[offset]) {
-                    waveDataRMax = Math.max(waveDataRMax, waveDataR[offset], waveDataL[offset]);
-                    waveDataRMin = Math.min(waveDataRMin, waveDataR[offset], waveDataL[offset]);
                 }
-            }
-            // NOTE : かなり雑なループなため, バグるかも
-            if (endOffset < maxOffset) {
-                setTimeout(() => {
-                    processPartialMakeWaveSegment(endOffset, endOffset+(endOffset-startOffset), allendCallback);
-                }, 10);
-            } else {
-                setTimeout(() => {
-                    allendCallback();
-                }, 10)
-            }
-            return;
+                processPartialMakeWaveSegment2(startOffset, endOffset);
+            });
         }
 
-        const segmentPartition = 10000;
-        const startOffset = 0;
-        const endOffset = segmentPartition;
-        let allendCallback = () => {
-            // -32768~32767に範囲をおさえる(音割れ防止)
-            const correctRate = Math.min(32767 / waveDataRMax, -32768 / waveDataRMin);
-            console.log(waveDataRMax, waveDataRMin, correctRate);
-            if (correctRate < 1) {
-                for (let offset = 0; offset < maxOffset; offset++) {
-                    waveDataR[offset] = Math.round(waveDataR[offset] *  correctRate * 0.99);
-                    waveDataL[offset] = Math.round(waveDataL[offset] *  correctRate * 0.99);
-                }
-            }
-    
-            console.log(maxTick, maxOffset, tickNotesMap, tickInstrumentMap, tickTempoMap, tickToOffset, offsetNotesMap, offsetChannelInfoMap);
-            
-            // console.log(JSON.stringify(waveData.slice(50000, 100000)));
-    
-            // 4. waveデータをriffに入れて新waveを作成 (Little Endian)
-            const riffData = new Array<number>(); // uint8
-            riffData[0] = 'R'.charCodeAt(0);
-            riffData[1] = 'I'.charCodeAt(0);
-            riffData[2] = 'F'.charCodeAt(0);
-            riffData[3] = 'F'.charCodeAt(0);
-            riffData[8]  = 'W'.charCodeAt(0);
-            riffData[9]  = 'A'.charCodeAt(0);
-            riffData[10] = 'V'.charCodeAt(0);
-            riffData[11] = 'E'.charCodeAt(0);
-            riffData[12] = 'f'.charCodeAt(0);
-            riffData[13] = 'm'.charCodeAt(0);
-            riffData[14] = 't'.charCodeAt(0);
-            riffData[15] = ' '.charCodeAt(0);
-            riffData[16] = 16;   // fmt block in 20-32
-            riffData[17] = 0;
-            riffData[18] = 0;
-            riffData[19] = 0;
-            riffData[20] = 1;    // linear PCM
-            riffData[21] = 0;
-            riffData[22] = 2;    // Stereo
-            riffData[23] = 0;
-            riffData[24] = 0x44 ; // 44100 Hz
-            riffData[25] = 0xAC;
-            riffData[26] = 0x00;
-            riffData[27] = 0x00;
-            riffData[28] = 0x10; // 44100 * 4 = 176400 bytes / sec
-            riffData[29] = 0xB1;
-            riffData[30] = 0x02;
-            riffData[31] = 0x00;
-            riffData[32] = 4;    // 4byte / frame
-            riffData[33] = 0;
-            riffData[34] = 16;   // 16bit / frame
-            riffData[35] = 0;
-            riffData[36] = 'd'.charCodeAt(0);
-            riffData[37] = 'a'.charCodeAt(0);
-            riffData[38] = 't'.charCodeAt(0);
-            riffData[39] = 'a'.charCodeAt(0);
-            riffData[40] = 0;
-            riffData[41] = 0;
-            riffData[42] = 0;
-            riffData[43] = 0;
-    
-            for (let i = 0; i < waveDataR.length; i++) {
-                const subOffset = 44 + i * 4;
-                riffData[subOffset]   = (!waveDataR[i]) ? 0 : waveDataR[i] & 0xFF;
-                riffData[subOffset+1] = (!waveDataR[i]) ? 0 : ((waveDataR[i] >> 8) & 0xFF);
-                riffData[subOffset+2] = (!waveDataL[i]) ? 0 : waveDataL[i] & 0xFF;
-                riffData[subOffset+3] = (!waveDataL[i]) ? 0 : ((waveDataL[i] >> 8) & 0xFF);
-            }
-            const ret = new Uint8Array(riffData);
-            Util.setLittleEndianNumberToUint8Array(ret, 4, 4, waveDataR.length * 4 + 44);
-            Util.setLittleEndianNumberToUint8Array(ret, 24, 4, bitRate); // bitrate (default : 44100Hz)
-            Util.setLittleEndianNumberToUint8Array(ret, 28, 4, bitRate*4); // sample rate (4byte * bitrate)
-            Util.setLittleEndianNumberToUint8Array(ret, 40, 4, waveDataR.length * 4);
-    
-            const channelRiffDatas = new Map<number, Uint8Array>();
-            channelIDs.forEach(channelID => {
-                const waveDataR = channelWaveDatas.get(channelID)[0];
-                const waveDataL = channelWaveDatas.get(channelID)[1];
-    
-                const mm = channelWaveDataMaxMin.get(channelID);
-                if (!mm)return;
-                const [max, min] = mm;
-                const correctRate = Math.min(1, 32767 / max, -32768 / min);
+        let allendCallback = () : Promise<SynthesizeResult> => {
+            console.log("allendCallback");
+            return new Promise<SynthesizeResult>((done) => {
+                // -32768~32767に範囲をおさえる(音割れ防止)
+                const correctRate = Math.min(32767 / waveDataRMax, -32768 / waveDataRMin);
+                console.log(waveDataRMax, waveDataRMin, correctRate);
                 if (correctRate < 1) {
                     for (let offset = 0; offset < maxOffset; offset++) {
-                        waveDataR[offset] = Math.round(waveDataR[offset] * correctRate * 0.99);
-                        waveDataL[offset] = Math.round(waveDataL[offset] * correctRate * 0.99);
+                        waveDataR[offset] = Math.round(waveDataR[offset] *  correctRate * 0.99);
+                        waveDataL[offset] = Math.round(waveDataL[offset] *  correctRate * 0.99);
                     }
                 }
-                // RIFFデータを雑に塗り替えながらチャンネル別のwave作成(波形のみ塗りつぶすため問題なし)
+        
+                console.log(maxTick, maxOffset, tickNotesMap, tickInstrumentMap, tickTempoMap, tickToOffset, offsetNotesMap, offsetChannelInfoMap);
+                
+                // console.log(JSON.stringify(waveData.slice(50000, 100000)));
+        
+                // 4. waveデータをriffに入れて新waveを作成 (Little Endian)
+                const riffData = new Array<number>(); // uint8
+                riffData[0] = 'R'.charCodeAt(0);
+                riffData[1] = 'I'.charCodeAt(0);
+                riffData[2] = 'F'.charCodeAt(0);
+                riffData[3] = 'F'.charCodeAt(0);
+                riffData[8]  = 'W'.charCodeAt(0);
+                riffData[9]  = 'A'.charCodeAt(0);
+                riffData[10] = 'V'.charCodeAt(0);
+                riffData[11] = 'E'.charCodeAt(0);
+                riffData[12] = 'f'.charCodeAt(0);
+                riffData[13] = 'm'.charCodeAt(0);
+                riffData[14] = 't'.charCodeAt(0);
+                riffData[15] = ' '.charCodeAt(0);
+                riffData[16] = 16;   // fmt block in 20-32
+                riffData[17] = 0;
+                riffData[18] = 0;
+                riffData[19] = 0;
+                riffData[20] = 1;    // linear PCM
+                riffData[21] = 0;
+                riffData[22] = 2;    // Stereo
+                riffData[23] = 0;
+                riffData[24] = 0x44 ; // 44100 Hz
+                riffData[25] = 0xAC;
+                riffData[26] = 0x00;
+                riffData[27] = 0x00;
+                riffData[28] = 0x10; // 44100 * 4 = 176400 bytes / sec
+                riffData[29] = 0xB1;
+                riffData[30] = 0x02;
+                riffData[31] = 0x00;
+                riffData[32] = 4;    // 4byte / frame
+                riffData[33] = 0;
+                riffData[34] = 16;   // 16bit / frame
+                riffData[35] = 0;
+                riffData[36] = 'd'.charCodeAt(0);
+                riffData[37] = 'a'.charCodeAt(0);
+                riffData[38] = 't'.charCodeAt(0);
+                riffData[39] = 'a'.charCodeAt(0);
+                riffData[40] = 0;
+                riffData[41] = 0;
+                riffData[42] = 0;
+                riffData[43] = 0;
+        
                 for (let i = 0; i < waveDataR.length; i++) {
                     const subOffset = 44 + i * 4;
                     riffData[subOffset]   = (!waveDataR[i]) ? 0 : waveDataR[i] & 0xFF;
@@ -1102,22 +1075,54 @@ export namespace Synthesizer {
                     riffData[subOffset+2] = (!waveDataL[i]) ? 0 : waveDataL[i] & 0xFF;
                     riffData[subOffset+3] = (!waveDataL[i]) ? 0 : ((waveDataL[i] >> 8) & 0xFF);
                 }
-                const channelRiffData = new Uint8Array(riffData);
-                Util.setLittleEndianNumberToUint8Array(channelRiffData, 4, 4, waveDataR.length * 4 + 44);
-                Util.setLittleEndianNumberToUint8Array(channelRiffData, 24, 4, bitRate); // bitrate (default : 44100Hz)
-                Util.setLittleEndianNumberToUint8Array(channelRiffData, 28, 4, bitRate*4); // sample rate (4byte * bitrate)
-                Util.setLittleEndianNumberToUint8Array(channelRiffData, 40, 4, waveDataR.length * 4);
-                channelRiffDatas.set(channelID, channelRiffData);
+                const ret = new Uint8Array(riffData);
+                Util.setLittleEndianNumberToUint8Array(ret, 4, 4, waveDataR.length * 4 + 44);
+                Util.setLittleEndianNumberToUint8Array(ret, 24, 4, bitRate); // bitrate (default : 44100Hz)
+                Util.setLittleEndianNumberToUint8Array(ret, 28, 4, bitRate*4); // sample rate (4byte * bitrate)
+                Util.setLittleEndianNumberToUint8Array(ret, 40, 4, waveDataR.length * 4);
+        
+                const channelRiffDatas = new Map<number, Uint8Array>();
+                channelIDs.forEach(channelID => {
+                    const waveDataR = channelWaveDatas.get(channelID)[0];
+                    const waveDataL = channelWaveDatas.get(channelID)[1];
+        
+                    const mm = channelWaveDataMaxMin.get(channelID);
+                    if (!mm)return;
+                    const [max, min] = mm;
+                    const correctRate = Math.min(1, 32767 / max, -32768 / min);
+                    if (correctRate < 1) {
+                        for (let offset = 0; offset < maxOffset; offset++) {
+                            waveDataR[offset] = Math.round(waveDataR[offset] * correctRate * 0.99);
+                            waveDataL[offset] = Math.round(waveDataL[offset] * correctRate * 0.99);
+                        }
+                    }
+                    // RIFFデータを雑に塗り替えながらチャンネル別のwave作成(波形のみ塗りつぶすため問題なし)
+                    for (let i = 0; i < waveDataR.length; i++) {
+                        const subOffset = 44 + i * 4;
+                        riffData[subOffset]   = (!waveDataR[i]) ? 0 : waveDataR[i] & 0xFF;
+                        riffData[subOffset+1] = (!waveDataR[i]) ? 0 : ((waveDataR[i] >> 8) & 0xFF);
+                        riffData[subOffset+2] = (!waveDataL[i]) ? 0 : waveDataL[i] & 0xFF;
+                        riffData[subOffset+3] = (!waveDataL[i]) ? 0 : ((waveDataL[i] >> 8) & 0xFF);
+                    }
+                    const channelRiffData = new Uint8Array(riffData);
+                    Util.setLittleEndianNumberToUint8Array(channelRiffData, 4, 4, waveDataR.length * 4 + 44);
+                    Util.setLittleEndianNumberToUint8Array(channelRiffData, 24, 4, bitRate); // bitrate (default : 44100Hz)
+                    Util.setLittleEndianNumberToUint8Array(channelRiffData, 28, 4, bitRate*4); // sample rate (4byte * bitrate)
+                    Util.setLittleEndianNumberToUint8Array(channelRiffData, 40, 4, waveDataR.length * 4);
+                    channelRiffDatas.set(channelID, channelRiffData);
+                });
+        
+                const result = new SynthesizeResult();
+                result.waveSegment = ret;
+                result.channelToWaveSegment = channelRiffDatas;
+                result.channelToInstrument = new Map(Array.from(channelIDs).map(channelID => [channelID, channelInfoMap.get(channelID)?.[1]?.insChunk]));
+                done(result);
             });
-    
-            const result = new SynthesizeResult();
-            result.waveSegment = ret;
-            result.channelToWaveSegment = channelRiffDatas;
-            result.channelToInstrument = new Map(Array.from(channelIDs).map(channelID => [channelID, channelInfoMap.get(channelID)?.[1]?.insChunk]));
-            callback(result);
-
         }
 
-        processPartialMakeWaveSegment(startOffset, endOffset, allendCallback);
+        const segmentPartition = 10000;
+        const startOffset = 0;
+        const endOffset = segmentPartition;
+        return processPartialMakeWaveSegment(startOffset, endOffset).then(() => allendCallback());
     }
 }

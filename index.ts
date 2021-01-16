@@ -98,7 +98,7 @@ async function loadMIDIFile(e : Event) : Promise<void> {
         const parser = new MIDIParser();
         const parseResult = await parser.parseFile(file);
         console.log(parseResult);
-        Synthesizer.synthesizeMIDI(parseResult, dlsParseResult, Synthesizer.defaultBitRate, (synthesizeResult : Synthesizer.SynthesizeResult) => {
+        Synthesizer.synthesizeMIDI(parseResult, dlsParseResult, Synthesizer.defaultBitRate).then((synthesizeResult) => {
 
             const blob = new Blob([synthesizeResult.waveSegment]);
             const url = window.URL.createObjectURL(blob);
