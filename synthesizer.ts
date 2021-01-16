@@ -1266,4 +1266,74 @@ export namespace Synthesizer {
 
         return result;
     }
+
+    
+    export class CombFilter {
+        private _buffer1 : Array<number>;
+        //private _buffer2 : Array<number>;
+        private _f : number;
+        private _N : number;
+        private _offset : number;
+
+        constructor(f : number, N : number) {
+            this._f = f;
+            this._N = N;
+            this._offset = 0;
+            this._buffer1 = new Array<number>(this._N+1).fill(0, 0, this._N+1);
+            //this._buffer2 = new Array<number>(2).fill(0, 0, 2);
+        }
+
+        update(input : number) {
+            this._offset++;
+            const offset1W = (this._offset % this._buffer1.length);
+            let offset1R = offset1W - this._N;
+            while (offset1R < 0) {
+                offset1R += this._buffer1.length;
+            }
+            const ret = this._buffer1[offset1R] * this._f + input;
+            this._buffer1[offset1W] = -ret;
+            return ret;
+        }
+    }
+
+    export class FeedbackCombFilter {
+        private _buffer1 : Array<number>;
+        private _buffer2 : Array<number>;
+        private _f : number;
+        private _d : number;
+        private _N : number;
+        private _offset : number;
+
+        constructor(f : number, d : number, N : number) {
+            this._f = f;
+            this._d = d;
+            this._N = N;
+            this._offset = 0;
+            this._buffer1 = new Array<number>(this._N+1).fill(0, 0, this._N+1);
+            this._buffer2 = new Array<number>(2).fill(0, 0, 2);
+        }
+
+        update(input : number) {
+            this._offset++;
+            const offset1W = (this._offset % this._buffer1.length);
+            let offset1R = offset1W - (this._buffer1.length-1);
+            while (offset1R < 0) {
+                offset1R += this._buffer1.length;
+            }
+            const offset2W = (this._offset % this._buffer2.length);
+            let offset2R = offset2W - (this._buffer2.length-1);
+            while (offset2R < 0) {
+                offset2R += this._buffer2.length;
+            }
+            const R = (1 - this._d) * this._buffer1[offset1R] + this._d * this._buffer2[offset2R]
+            const ret = this._buffer1[offset1W];
+            this._buffer2[offset2W] = R;
+            this._buffer1[offset1W] = input - this._f * R;
+            return ret;
+        }
+    }
+
+    function createLowPassCombFilter() {
+
+    }
 }
