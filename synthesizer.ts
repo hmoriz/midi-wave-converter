@@ -1333,7 +1333,33 @@ export namespace Synthesizer {
         }
     }
 
-    function createLowPassCombFilter() {
+    export class AllpassFilter {
+        private _buffer1 : Array<number>;
+        //private _buffer2 : Array<number>;
+        private _a : number;
+        private _D : number;
+        private _offset : number;
+
+        constructor(a : number, D : number) {
+            this._a = a;
+            this._D = D;
+            this._offset = 0;
+            this._buffer1 = new Array<number>(this._D+1).fill(0, 0, this._D+1);
+            //this._buffer2 = new Array<number>(2).fill(0, 0, 2);
+        }
+
+        update(input : number) {
+            this._offset++;
+            const offset1W = (this._offset % this._buffer1.length);
+            let offset1R = offset1W - this._D;
+            while (offset1R < 0) {
+                offset1R += this._buffer1.length;
+            }
+            const ret = this._buffer1[offset1R] - this._a * input; 
+            this._buffer1[offset1W] = input + this._a * ret;
+            return ret;
+        }
+    }
 
     }
 }
