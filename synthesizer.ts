@@ -586,27 +586,12 @@ export namespace Synthesizer {
         ]; // NOTE: メモリを消費しすぎないようにする
 
         // for Reverb
-        const reverbDelay = Math.trunc(44100 * 2000.0 / 1000); // 2s
-        const waveDataBufferForReverbCapacity = reverbDelay + 1;
-        const waveDataBufferForReverbCapacities = [191, 373, 1559, 743];
-        const waveDataBufferForReverb : [Array<number>, Array<number>] = [
-            new Array(), // R 16bit
-            new Array(), // L 16bit
-        ];
-        const waveDataBufferForReverbB : [[Array<number>, Array<number>, Array<number>, Array<number>], [Array<number>, Array<number>, Array<number>, Array<number>]] = [
-            [new Array(), new Array(), new Array(), new Array()], // R [0, 1, 2, 3]
-            [new Array(), new Array(), new Array(), new Array()], // L [0, 1, 2, 3]
-        ]
-        let historyLPFR = 0;
-        let historyLPFL = 0;
-        let historyHPFR = 0;
-        let historyLHPF = 0;
-        let historyEPFR = 0;
-        let historyLEPF = 0;
-        const historyTAForReverb = [0, 0];
-        const historyTBForReverb = [0, 0];
-        const historySForReverb = [0, 0];
-        const historyTForReverb = [0, 0];
+        const reverberR = new Reverber();
+        const reverberL = new Reverber();
+        const waveDataBufferForReverbCapacity = 1;
+        const waveDataBufferForReverb : [number, number] = [0, 0]; // R L
+
+
 
         for (let offset = 0; offset < maxOffset; offset++) {
             if (offset % 10000 === 0) {
@@ -616,16 +601,11 @@ export namespace Synthesizer {
             waveDataL[offset] = 0;
             const offsetForChorus = offset % waveDataBufferForChorusCapacity;
             const offsetForReverb = offset % waveDataBufferForReverbCapacity;
-            const offsetForReverbBs = waveDataBufferForReverbCapacities.map(capacity => offset % capacity);
             if (withEffect) {
                 waveDataWithEffectR[offset] = 0;
                 waveDataWithEffectL[offset] = 0;
                 waveDataOnlyEffectR[offset] = 0;
                 waveDataOnlyEffectL[offset] = 0;
-                waveDataBufferForChorus[0][offsetForChorus] = 0;
-                waveDataBufferForChorus[1][offsetForChorus] = 0;
-                waveDataBufferForReverb[0][offsetForReverb] = 0;
-                waveDataBufferForReverb[1][offsetForReverb] = 0;
             }
 
             let offsetForChannelData = offset;
@@ -1018,8 +998,8 @@ export namespace Synthesizer {
                 }
                 // リバーブ集計
                 if (withEffect && channelInfo.reverbLevel > 0) {
-                    waveDataBufferForReverb[0][offsetForReverb] += channelWaveDatas.get(channelID)[0][offsetForChannelData] * (channelInfo.reverbLevel / 127);
-                    waveDataBufferForReverb[1][offsetForReverb] += channelWaveDatas.get(channelID)[1][offsetForChannelData] * (channelInfo.reverbLevel / 127);
+                    waveDataBufferForReverb[0] += channelWaveDatas.get(channelID)[0][offsetForChannelData] * (channelInfo.reverbLevel / 127);
+                    waveDataBufferForReverb[1] += channelWaveDatas.get(channelID)[1][offsetForChannelData] * (channelInfo.reverbLevel / 127);
                 }
 
                 if (!channelWaveDataMaxMin.has(channelID)) {
@@ -1067,53 +1047,15 @@ export namespace Synthesizer {
             // }
 
             // リバーブ適用
-            let delayOffsetForReverb = offsetForReverb - reverbDelay;
-            while (delayOffsetForReverb < 0) {
-                delayOffsetForReverb += waveDataBufferForChorusCapacity;
-            }
+            // 入力→出力の関係性はClassが全部請け負ってるのでそれを拾うのみ
+            const reverbOutputR = reverberR.update(waveDataBufferForReverb[0]);
+            waveDataWithEffectR[offset] += reverbOutputR;
+            waveDataOnlyEffectR[offset] += reverbOutputR;
+            const reverbOutputL = reverberL.update(waveDataBufferForReverb[1]);
+            waveDataWithEffectL[offset] += reverbOutputL;
+            waveDataOnlyEffectL[offset] += reverbOutputL;
 
-            const fixpR = waveDataBufferForReverb[0][offsetForReverb] || 0
-            const fixpL = waveDataBufferForReverb[1][offsetForReverb] || 0
-
-            // R
-            historyLPFR = historyLPFR * 0.35 + 
-                ((waveDataBufferForReverbB[0][2][offsetForReverbBs[2]] || 0) + historyTBForReverb[0]) * 0.55 +
-                historyTAForReverb[0] * 0.125;
-            historyTAForReverb[0] = waveDataBufferForReverbB[0][3][offsetForReverbBs[3]] || 0;
-            const sR = waveDataBufferForReverbB[0][3][offsetForReverbBs[3]] = waveDataBufferForReverbB[0][0][offsetForReverbBs[0]] || 0;
-            waveDataBufferForReverbB[0][0][offsetForReverbBs[0]] = -historyLPFR;
-
-            const tR = (historyHPFR + fixpR) * 0.5;
-            historyHPFR = tR - fixpR;
-
-            waveDataBufferForReverbB[0][2][offsetForReverbBs[2]] = (sR - (fixpR * 0.12)) * 0.9;
-            historyTBForReverb[0] = waveDataBufferForReverbB[0][1][offsetForReverbBs[1]] || 0;
-            waveDataBufferForReverbB[0][1][offsetForReverbBs[1]] = tR;
-
-            historyEPFR = historyEPFR * 0.4 + historyTAForReverb[0] * 0.48;
-            waveDataWithEffectR[offset] += (historyEPFR + historyTAForReverb[0]) * 1.00787;
-            waveDataOnlyEffectR[offset] += (historyEPFR + historyTAForReverb[0]) * 1.00787;
-
-            // L
-            historyLPFL = historyLPFL * 0.35 + 
-                ((waveDataBufferForReverbB[1][2][offsetForReverbBs[2]] || 0) + historyTBForReverb[1]) * 0.55 +
-                historyTAForReverb[1] * 0.125;
-            historyTAForReverb[1] = waveDataBufferForReverbB[1][3][offsetForReverbBs[3]] || 0;
-            const sL = waveDataBufferForReverbB[1][3][offsetForReverbBs[3]] = waveDataBufferForReverbB[1][0][offsetForReverbBs[0]] || 0;
-            waveDataBufferForReverbB[1][0][offsetForReverbBs[0]] = -historyLPFL;
-
-            const tL = (historyLHPF + fixpL) * 0.5;
-            historyLHPF = tL - fixpL;
-
-            waveDataBufferForReverbB[1][2][offsetForReverbBs[2]] = (sL - (fixpL * 0.12)) * 0.9
-            historyTBForReverb[1] = waveDataBufferForReverbB[1][1][offsetForReverbBs[1]] || 0;
-            waveDataBufferForReverbB[1][1][offsetForReverbBs[1]] = tL;
-
-            historyLEPF = historyLEPF * 0.4 + historyTAForReverb[1] * 0.48;
-            waveDataWithEffectL[offset] += (historyLEPF + historyTAForReverb[1]) * 2.00787
-            waveDataOnlyEffectL[offset] += (historyLEPF + historyTAForReverb[1]) * 2.00787
-
-
+            // 最大値・最小値を集計(音割れ防止の為の対応を後でやるため, 最後にMath.maxは引数がパンクするため)
             if (waveDataR[offset]) {
                 waveDataRMax = Math.max(waveDataRMax, waveDataR[offset], waveDataL[offset], waveDataWithEffectR[offset], waveDataWithEffectL[offset]);
                 waveDataRMin = Math.min(waveDataRMin, waveDataR[offset], waveDataL[offset], waveDataWithEffectR[offset], waveDataWithEffectL[offset]);
@@ -1283,7 +1225,7 @@ export namespace Synthesizer {
             //this._buffer2 = new Array<number>(2).fill(0, 0, 2);
         }
 
-        update(input : number) {
+        update(input : number) : number {
             this._offset++;
             const offset1W = (this._offset % this._buffer1.length);
             let offset1R = offset1W - this._N;
@@ -1313,7 +1255,7 @@ export namespace Synthesizer {
             this._buffer2 = new Array<number>(2).fill(0, 0, 2);
         }
 
-        update(input : number) {
+        update(input : number) : number {
             this._offset++;
             const offset1W = (this._offset % this._buffer1.length);
             let offset1R = offset1W - (this._buffer1.length-1);
@@ -1348,7 +1290,7 @@ export namespace Synthesizer {
             //this._buffer2 = new Array<number>(2).fill(0, 0, 2);
         }
 
-        update(input : number) {
+        update(input : number) : number {
             this._offset++;
             const offset1W = (this._offset % this._buffer1.length);
             let offset1R = offset1W - this._D;
@@ -1361,5 +1303,54 @@ export namespace Synthesizer {
         }
     }
 
+    export class Reverber {
+        private readonly _fdns : Array<[number, number, number]> = [
+            [0.84, 0.2, 1557],
+            [0.84, 0.2, 1617],
+            [0.84, 0.2, 1491],
+            [0.84, 0.2, 1422],
+            [0.84, 0.2, 1277],
+            [0.84, 0.2, 1356],
+            [0.84, 0.2, 1188],
+            [0.84, 0.2, 1116],
+        ];
+        private readonly _aps : Array<[number, number]> = [
+            [0.5, 225],
+            [0.5, 556],
+            [0.5, 441],
+            [0.5, 341],
+        ];
+
+        private _LBCF1 : [FeedbackCombFilter, FeedbackCombFilter, FeedbackCombFilter, FeedbackCombFilter];
+        private _LBCF2 : [FeedbackCombFilter, FeedbackCombFilter, FeedbackCombFilter, FeedbackCombFilter];
+        private _APF : [AllpassFilter, AllpassFilter, AllpassFilter, AllpassFilter];
+
+        constructor() {
+            this._LBCF1 = [null, null, null, null];
+            this._LBCF2 = [null, null, null, null];
+            this._APF = [null, null, null, null];
+            for(let i = 0; i < 4; i++) {
+                this._LBCF1[i] = new FeedbackCombFilter(...this._fdns[i]);
+                this._LBCF2[i] = new FeedbackCombFilter(...this._fdns[i+4]);
+                this._APF[i] = new AllpassFilter(...this._aps[i]);
+            }
+        }
+
+        update(input : number) {
+            const result1s = this._LBCF1.map(lbcf => lbcf.update(input));
+            const result2s = this._LBCF2.map(lbcf => lbcf.update(input));
+
+            const result1 = result1s.reduce((a, b) => a+b, 0);
+            const result2 = result2s.reduce((a, b) => a+b, 0);
+
+            const lbcfResult = result1 - result2;
+
+            const resultA = this._APF[0].update(lbcfResult);
+            const resultB = this._APF[0].update(resultA);
+            const resultC = this._APF[0].update(resultB);
+            const resultD = this._APF[0].update(resultC);
+
+            return resultD;
+        }
     }
 }
