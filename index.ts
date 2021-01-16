@@ -106,6 +106,7 @@ async function loadMIDIFile(e : Event) : Promise<void> {
         const newAudio = document.createElement('audio');
         newAudio.src = url;
         newAudio.controls = true;
+        newAudio.loop = true;
 
         const audioDiv = document.createElement("div");
         audioDiv.innerText = `Result\n${file.name} => WAVE : `;
@@ -116,6 +117,7 @@ async function loadMIDIFile(e : Event) : Promise<void> {
             const newAudioWithEffect = document.createElement('audio');
             newAudioWithEffect.src = urlWithEffect;
             newAudioWithEffect.controls = true;
+            newAudioWithEffect.loop = true;
 
             audioDiv.appendChild(document.createTextNode("    with Effect: "));
             audioDiv.appendChild(newAudioWithEffect);
@@ -125,6 +127,7 @@ async function loadMIDIFile(e : Event) : Promise<void> {
             const newAudioOnlyEffect = document.createElement('audio');
             newAudioOnlyEffect.src = urlOnlyEffect;
             newAudioOnlyEffect.controls = true;
+            newAudioOnlyEffect.loop = true;
             
             audioDiv.appendChild(document.createTextNode("    only Effect: "));
             audioDiv.appendChild(newAudioOnlyEffect);
@@ -164,6 +167,13 @@ async function loadMIDIFile(e : Event) : Promise<void> {
             dataset.set(synthesizeResult.waveSegment.slice(offset, offset+2), i*2);
         }
         addChartFromUint8ToInt16(chart, dataset);
+
+        const dataset2 = new Uint8Array(dataSize*2);
+        for (let i = 0; i < dataSize; i++) {
+            const offset = firstNonZeroOffset + i * 1000;
+            dataset2.set(synthesizeResult.waveSegmentWithEffect.slice(offset, offset+2), i*2);
+        }
+        addChartFromUint8ToInt16(chart, dataset2);
     }
 }
 
