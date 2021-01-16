@@ -586,12 +586,9 @@ export namespace Synthesizer {
         ]; // NOTE: メモリを消費しすぎないようにする
 
         // for Reverb
-        const reverberR = new Reverber();
-        const reverberL = new Reverber();
-        const waveDataBufferForReverbCapacity = 1;
+        const reverber = new Reverber();
+        reverber.gain = 0.15; // そのままの設定だとリバーブが弱すぎるので強化しちゃう
         const waveDataBufferForReverb : [number, number] = [0, 0]; // R L
-
-
 
         for (let offset = 0; offset < maxOffset; offset++) {
             if (offset % 10000 === 0) {
@@ -600,12 +597,13 @@ export namespace Synthesizer {
             waveDataR[offset] = 0;
             waveDataL[offset] = 0;
             const offsetForChorus = offset % waveDataBufferForChorusCapacity;
-            const offsetForReverb = offset % waveDataBufferForReverbCapacity;
             if (withEffect) {
                 waveDataWithEffectR[offset] = 0;
                 waveDataWithEffectL[offset] = 0;
                 waveDataOnlyEffectR[offset] = 0;
                 waveDataOnlyEffectL[offset] = 0;
+                waveDataBufferForReverb[0] = 0;
+                waveDataBufferForReverb[1] = 0;
             }
 
             let offsetForChannelData = offset;
@@ -1048,10 +1046,9 @@ export namespace Synthesizer {
 
             // リバーブ適用
             // 入力→出力の関係性はClassが全部請け負ってるのでそれを拾うのみ
-            const reverbOutputR = reverberR.update(waveDataBufferForReverb[0]);
+            const [reverbOutputR, reverbOutputL] = reverber.update(waveDataBufferForReverb[0], waveDataBufferForReverb[1]);
             waveDataWithEffectR[offset] += reverbOutputR;
             waveDataOnlyEffectR[offset] += reverbOutputR;
-            const reverbOutputL = reverberL.update(waveDataBufferForReverb[1]);
             waveDataWithEffectL[offset] += reverbOutputL;
             waveDataOnlyEffectL[offset] += reverbOutputL;
 
@@ -1081,10 +1078,12 @@ export namespace Synthesizer {
                 waveDataL[offset] = Math.round(waveDataL[offset] *  correctRate * 0.99);
                 waveDataWithEffectR[offset] = Math.round(waveDataWithEffectR[offset] *  correctRate * 0.99);
                 waveDataWithEffectL[offset] = Math.round(waveDataWithEffectL[offset] *  correctRate * 0.99);
+                waveDataOnlyEffectR[offset] = Math.round(waveDataOnlyEffectR[offset] *  correctRate * 0.99);
+                waveDataOnlyEffectL[offset] = Math.round(waveDataOnlyEffectL[offset] *  correctRate * 0.99);
             }
         }
 
-        console.log(maxTick, maxOffset, tickNotesMap, tickInstrumentMap, tickTempoMap, tickToOffset, offsetNotesMap, offsetChannelInfoMap);
+        console.log(maxTick, maxOffset, correctRate, tickNotesMap, tickInstrumentMap, tickTempoMap, tickToOffset, offsetNotesMap, offsetChannelInfoMap);
         
         // console.log(JSON.stringify(waveData.slice(50000, 100000)));
 
@@ -1304,7 +1303,32 @@ export namespace Synthesizer {
     }
 
     export class Reverber {
-        private readonly _fdns : Array<[number, number, number]> = [
+        gain : number = 0.015;
+        dry  : number = 0;
+        private _wet = 1 / 3;
+        get wet() {
+            return this._wet;
+        }
+        set wet(v : number) {
+            this._wet = v;
+            this._wet1 = this._wet * (this._width / 2 + 0.5);
+            this._wet2 = this._wet * ((1-this._width)/2);
+        }
+        private _width = 1;
+        private _wet1 = this._wet * (this._width / 2 + 0.5);
+        private _wet2 = this._wet * ((1-this._width)/2);
+
+        private readonly _fdnsR : Array<[number, number, number]> = [
+            [0.84, 0.2, 1557+23],
+            [0.84, 0.2, 1617+23],
+            [0.84, 0.2, 1491+23],
+            [0.84, 0.2, 1422+23],
+            [0.84, 0.2, 1277+23],
+            [0.84, 0.2, 1356+23],
+            [0.84, 0.2, 1188+23],
+            [0.84, 0.2, 1116+23],
+        ];
+        private readonly _fdnsL : Array<[number, number, number]> = [
             [0.84, 0.2, 1557],
             [0.84, 0.2, 1617],
             [0.84, 0.2, 1491],
@@ -1321,36 +1345,70 @@ export namespace Synthesizer {
             [0.5, 341],
         ];
 
-        private _LBCF1 : [FeedbackCombFilter, FeedbackCombFilter, FeedbackCombFilter, FeedbackCombFilter];
-        private _LBCF2 : [FeedbackCombFilter, FeedbackCombFilter, FeedbackCombFilter, FeedbackCombFilter];
+        private _LBCF1L : [FeedbackCombFilter, FeedbackCombFilter, FeedbackCombFilter, FeedbackCombFilter];
+        private _LBCF2L : [FeedbackCombFilter, FeedbackCombFilter, FeedbackCombFilter, FeedbackCombFilter];
+        private _LBCF1R : [FeedbackCombFilter, FeedbackCombFilter, FeedbackCombFilter, FeedbackCombFilter];
+        private _LBCF2R : [FeedbackCombFilter, FeedbackCombFilter, FeedbackCombFilter, FeedbackCombFilter];
         private _APF : [AllpassFilter, AllpassFilter, AllpassFilter, AllpassFilter];
 
         constructor() {
-            this._LBCF1 = [null, null, null, null];
-            this._LBCF2 = [null, null, null, null];
+            this._LBCF1R = [null, null, null, null];
+            this._LBCF2R = [null, null, null, null];
+            this._LBCF1L = [null, null, null, null];
+            this._LBCF2L = [null, null, null, null];
             this._APF = [null, null, null, null];
             for(let i = 0; i < 4; i++) {
-                this._LBCF1[i] = new FeedbackCombFilter(...this._fdns[i]);
-                this._LBCF2[i] = new FeedbackCombFilter(...this._fdns[i+4]);
+                this._LBCF1R[i] = new FeedbackCombFilter(...this._fdnsR[i]);
+                this._LBCF2R[i] = new FeedbackCombFilter(...this._fdnsR[i+4]);
+                this._LBCF1L[i] = new FeedbackCombFilter(...this._fdnsL[i]);
+                this._LBCF2L[i] = new FeedbackCombFilter(...this._fdnsL[i+4]);
                 this._APF[i] = new AllpassFilter(...this._aps[i]);
             }
         }
 
-        update(input : number) {
-            const result1s = this._LBCF1.map(lbcf => lbcf.update(input));
-            const result2s = this._LBCF2.map(lbcf => lbcf.update(input));
+        update(inputR : number, inputL : number) : [number, number] {
+            // R
+            let resultR : number;
+            {
+                const input = (inputR + inputL) * this.gain;
+                const result1s = this._LBCF1R.map(lbcf => lbcf.update(input));
+                const result2s = this._LBCF2R.map(lbcf => lbcf.update(input));
 
-            const result1 = result1s.reduce((a, b) => a+b, 0);
-            const result2 = result2s.reduce((a, b) => a+b, 0);
+                const result1 = result1s.reduce((a, b) => a+b, 0);
+                const result2 = result2s.reduce((a, b) => a+b, 0);
 
-            const lbcfResult = result1 - result2;
+                const lbcfResult = result1 + result2;
 
-            const resultA = this._APF[0].update(lbcfResult);
-            const resultB = this._APF[0].update(resultA);
-            const resultC = this._APF[0].update(resultB);
-            const resultD = this._APF[0].update(resultC);
+                const resultA = this._APF[0].update(lbcfResult);
+                const resultB = this._APF[1].update(resultA);
+                const resultC = this._APF[2].update(resultB);
+                const resultD = this._APF[3].update(resultC);
+                resultR = resultD;
+            }
 
-            return resultD;
+            // R
+            let resultL : number;
+            {
+                const input = (inputR + inputL) * this.gain;
+                const result1s = this._LBCF1L.map(lbcf => lbcf.update(input));
+                const result2s = this._LBCF2L.map(lbcf => lbcf.update(input));
+
+                const result1 = result1s.reduce((a, b) => a+b, 0);
+                const result2 = result2s.reduce((a, b) => a+b, 0);
+
+                const lbcfResult = result1 + result2;
+
+                const resultA = this._APF[0].update(lbcfResult);
+                const resultB = this._APF[1].update(resultA);
+                const resultC = this._APF[2].update(resultB);
+                const resultD = this._APF[3].update(resultC);
+                resultL = resultD;
+            }
+
+            return [
+                inputR * this.dry + this._wet1 * resultR + this._wet2 * resultL,
+                inputL * this.dry + this._wet1 * resultL + this._wet2 * resultR,
+            ]
         }
     }
 }
