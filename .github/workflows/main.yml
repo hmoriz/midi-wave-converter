@@ -42,7 +42,7 @@ jobs:
           git config --local user.name "github-actions[bot]"
           git commit -m "release" release/*
       - name: Push changes
-        uses: ad-m/github-push-action@0.6.0
+        uses: ad-m/github-push-action@master
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           branch: ${{ github.ref }}
