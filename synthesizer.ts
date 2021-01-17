@@ -5,7 +5,7 @@ import { Util } from "./util";
 
 export namespace Synthesizer {
     // 44100Hz
-    export const defaultBitRate = 44100;
+    export const defaultByteRate = 44100;
 
     // art1Infoのtime Cents -> sec
     export function getSecondsFromArt1Scale(lScale: number) {
@@ -87,6 +87,7 @@ export namespace Synthesizer {
                         if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_KEYONVELOCITY) {
                             ret.EG1VelocityToAttack = cb.lScale;
                             //console.log("EG1VelocityToAttack", cb.lScale, ret.EG1AttackTime);
+                            return;
                         }
                         break;
                     case DLS.ART1DESTINATION.CONN_EG1_DECAY:
@@ -321,7 +322,7 @@ export namespace Synthesizer {
         }
     }
 
-    export async function synthesizeMIDI(midi : MidiParseInfo, dls : DLSParseInfo, withEffect: boolean = true, outputChannel : boolean = true, bitRate : number = defaultBitRate) :  Promise<SynthesizeResult> {
+    export async function synthesizeMIDI(midi : MidiParseInfo, dls : DLSParseInfo, withEffect: boolean = true, outputChannel : boolean = true, byteRate : number = defaultByteRate) :  Promise<SynthesizeResult> {
 
         // rgn offset(number) -> art1Info(for rgn)
         const lartOffsetToArt1InfoMap = new Map<number, Art1Info>();
@@ -552,7 +553,7 @@ export namespace Synthesizer {
             if (tempoEvent) {
                 tempo = tempoEvent;
             }
-            offset += (1 / notePerTick) * (tempo / 1000000) * bitRate;
+            offset += (1 / notePerTick) * (tempo / 1000000) * byteRate;
             // if (tempoEvent) console.log(tick, tempo, offset);
             tickToOffset.set(tick, offset);
             maxOffset = Math.max(maxOffset, offset);
@@ -624,8 +625,7 @@ export namespace Synthesizer {
         });
         // channelID -> pitchBend(number)
         const pitchBendMap = new Map<number, number>();
-        let waveDataRMin = 1;
-        let waveDataRMax = -1;
+        let waveDataMaxMin = [1, -1];
         // channeiID -> [waveDataMin, waveDataMax]
         const channelWaveDataMaxMin = new Map<number, [number, number]>();
 
@@ -638,7 +638,7 @@ export namespace Synthesizer {
         ]; // NOTE: メモリを消費しすぎないようにする
 
         // for Reverb
-        const reverber = new Reverber();
+        const reverber = new Reverber(byteRate);
         reverber.gain = 0.15; // そのままの設定だとリバーブが弱すぎるので強化しちゃう
 
         const processPartialMakeWaveSegment = (startOffset : number, endOffset : number) : Promise<void> => {
@@ -712,8 +712,8 @@ export namespace Synthesizer {
                                     const noteID = noteInfo.noteID;
                                     const position = offset - attackedOffset;
                                     const positionFromReleased = offset - noteInfo.endOffset;
-                                    const sec = position / bitRate;
-                                    const secFromReleased = positionFromReleased / bitRate;
+                                    const sec = position / byteRate;
+                                    const secFromReleased = positionFromReleased / byteRate;
                                     const rgn = instrumentData.insChunk.lrgn.rgnList.find(rgn => {
                                         return rgn.rgnh.rangeKey.usLow <= noteID && 
                                             noteID <= rgn.rgnh.rangeKey.usHigh &&
@@ -747,7 +747,7 @@ export namespace Synthesizer {
                                             return;
                                         }
                                         const bps = waveChunk.bytesPerSecond;
-                                        const sampleOffsetDefaultSpeed = bps / bitRate;
+                                        const sampleOffsetDefaultSpeed = bps / byteRate;
                                         const wsmp = rgn.wsmp || waveChunk.wsmpChunk;
                                         let baseFrequency = 0;
                                         let waveLoopStart = 0;
@@ -1009,10 +1009,6 @@ export namespace Synthesizer {
                                         }
                                     }
                                 });
-                                if (waveDataR[offset]) {
-                                    waveDataRMax = Math.max(waveDataRMax, waveDataR[offset], waveDataL[offset]);
-                                    waveDataRMin = Math.min(waveDataRMin, waveDataR[offset], waveDataL[offset]);
-                                }
 
                                 // 消えたデータを除去
                                 channelIDAttackingNoteMap.set(channelID, attackingNotes.filter(data => !!data));
@@ -1047,7 +1043,7 @@ export namespace Synthesizer {
                         if (!withEffect) continue;
                         // コーラス適用
                         let delayOffsetForChorus = offsetForChorus - chorusDelay;
-                        delayOffsetForChorus -= (1+Math.sin(offset / 44100 * 2 * Math.PI * (3 * 0.122))) * (20 / 3.2 * 44100 / 1000) / 2;
+                        delayOffsetForChorus -= (1+Math.sin(offset / byteRate * 2 * Math.PI * (3 * 0.122))) * (20 / 3.2 * byteRate / 1000) / 2;
                         const deltaForChorus = delayOffsetForChorus - Math.floor(delayOffsetForChorus);
                         delayOffsetForChorus = Math.round(delayOffsetForChorus - deltaForChorus);
                         while (delayOffsetForChorus < 0) {
@@ -1068,12 +1064,12 @@ export namespace Synthesizer {
                         waveDataOnlyEffectL[offset] += chorusDataL;
 
                         // for debug
-                        if (offset % 10000 <= 10) {
-                            console.log(offset, offsetForChorus, deltaForChorus, delayOffsetForChorus, delayOffsetForChorus1, waveDataR[offset],
-                                chorusDataR, chorusDataL,
-                                waveDataBufferForChorus[0][offsetForChorus], waveDataWithEffectR[offset]);
-                            //console.log(offset, waveDataBufferForChorus[0][offsetForChorus], waveDataBufferForChorus[0][delayOffsetForChorus], waveDataBufferForChorus[0][delayOffsetForChorus1], offsetForChorus, delayOffsetForChorus, delayOffsetForChorus1, waveDataWithEffectR[offset], waveDataWithEffectL[offset]);
-                        }
+                        // if (offset % 10000 <= 10) {
+                        //     console.log(offset, offsetForChorus, deltaForChorus, delayOffsetForChorus, delayOffsetForChorus1, waveDataR[offset],
+                        //         chorusDataR, chorusDataL,
+                        //         waveDataBufferForChorus[0][offsetForChorus], waveDataWithEffectR[offset]);
+                        //     //console.log(offset, waveDataBufferForChorus[0][offsetForChorus], waveDataBufferForChorus[0][delayOffsetForChorus], waveDataBufferForChorus[0][delayOffsetForChorus1], offsetForChorus, delayOffsetForChorus, delayOffsetForChorus1, waveDataWithEffectR[offset], waveDataWithEffectL[offset]);
+                        // }
 
                         // リバーブ適用
                         // 入力→出力の関係性はClassが全部請け負ってるのでそれを拾うのみ
@@ -1082,21 +1078,19 @@ export namespace Synthesizer {
                         waveDataOnlyEffectR[offset] += reverbOutputR;
                         waveDataWithEffectL[offset] += reverbOutputL;
                         waveDataOnlyEffectL[offset] += reverbOutputL;
+                        
+                        // // for debug
+                        if (offset % 10000 <= 10) {
+                            console.log(offset, waveDataBufferForReverb, reverbOutputR, reverbOutputL, reverbOutputR / waveDataBufferForReverb[0], reverber);
+                            // console.log(JSON.stringify(waveDataBufferForReverbB[0]));
+                            // console.log(JSON.stringify(waveDataBufferForReverbB[1]));
+                        }
 
                         // 最大値・最小値を集計(音割れ防止の為の対応を後でやるため, 最後にMath.maxは引数がパンクするため)
                         if (waveDataR[offset]) {
-                            waveDataRMax = Math.max(waveDataRMax, waveDataR[offset], waveDataL[offset], waveDataWithEffectR[offset], waveDataWithEffectL[offset]);
-                            waveDataRMin = Math.min(waveDataRMin, waveDataR[offset], waveDataL[offset], waveDataWithEffectR[offset], waveDataWithEffectL[offset]);
+                            waveDataMaxMin[0] = Math.max(waveDataMaxMin[0], waveDataR[offset], waveDataL[offset], waveDataWithEffectR[offset], waveDataWithEffectL[offset]);
+                            waveDataMaxMin[1] = Math.min(waveDataMaxMin[1], waveDataR[offset], waveDataL[offset], waveDataWithEffectR[offset], waveDataWithEffectL[offset]);
                         }
-
-                        // // for debug
-                        // if (offset % 10000 <= 10) {
-                        //     console.log(offset, offsetForReverb, offsetForReverbBs, delayOffsetForReverb, historyEPFR, waveDataR[offset],
-                        //         historyLPFR, historyHPFR, historyEPFR,
-                        //         waveDataBufferForReverb[0][offsetForReverb], waveDataWithEffectR[offset], waveDataOnlyEffectR[offset]);
-                        //     // console.log(JSON.stringify(waveDataBufferForReverbB[0]));
-                        //     // console.log(JSON.stringify(waveDataBufferForReverbB[1]));
-                        // }
                     }
                     // NOTE : かなり雑なループなため, バグるかも
                     if (endOffset < maxOffset) {
@@ -1116,7 +1110,7 @@ export namespace Synthesizer {
             console.log("allendCallback");
             return new Promise<SynthesizeResult>((done) => {
                 // -32768~32767に範囲をおさえる(音割れ防止)
-                const correctRate = Math.min(32767 / waveDataRMax, -32768 / waveDataRMin);
+                const correctRate = Math.min(32767 / waveDataMaxMin[0], -32768 / waveDataMaxMin[1]);
                 //console.log(waveDataRMax, waveDataRMin, correctRate);
                 if (correctRate < 1) {
                     for (let offset = 0; offset < maxOffset; offset++) {
@@ -1188,8 +1182,8 @@ export namespace Synthesizer {
                 }
                 const waveDataSegment = new Uint8Array(riffData);
                 Util.setLittleEndianNumberToUint8Array(waveDataSegment, 4, 4, waveDataR.length * 4 + 44);
-                Util.setLittleEndianNumberToUint8Array(waveDataSegment, 24, 4, bitRate); // bitrate (default : 44100Hz)
-                Util.setLittleEndianNumberToUint8Array(waveDataSegment, 28, 4, bitRate*4); // sample rate (4byte * bitrate)
+                Util.setLittleEndianNumberToUint8Array(waveDataSegment, 24, 4, byteRate); // bitrate (default : 44100Hz)
+                Util.setLittleEndianNumberToUint8Array(waveDataSegment, 28, 4, byteRate*4); // sample rate (4byte * bitrate)
                 Util.setLittleEndianNumberToUint8Array(waveDataSegment, 40, 4, waveDataR.length * 4);
                 result.waveSegment = waveDataSegment;
 
@@ -1204,8 +1198,8 @@ export namespace Synthesizer {
                     }
                     const waveDataSegmentWithEffect = new Uint8Array(riffDataWithEffect);
                     Util.setLittleEndianNumberToUint8Array(waveDataSegmentWithEffect, 4, 4, waveDataWithEffectR.length * 4 + 44);
-                    Util.setLittleEndianNumberToUint8Array(waveDataSegmentWithEffect, 24, 4, bitRate); // bitrate (default : 44100Hz)
-                    Util.setLittleEndianNumberToUint8Array(waveDataSegmentWithEffect, 28, 4, bitRate*4); // sample rate (4byte * bitrate)
+                    Util.setLittleEndianNumberToUint8Array(waveDataSegmentWithEffect, 24, 4, byteRate); // bitrate (default : 44100Hz)
+                    Util.setLittleEndianNumberToUint8Array(waveDataSegmentWithEffect, 28, 4, byteRate*4); // sample rate (4byte * bitrate)
                     Util.setLittleEndianNumberToUint8Array(waveDataSegmentWithEffect, 40, 4, waveDataWithEffectR.length * 4);
                     result.waveSegmentWithEffect = waveDataSegmentWithEffect;
                     const riffDataOnlyEffect = Array.from(riffData);
@@ -1218,8 +1212,8 @@ export namespace Synthesizer {
                     }
                     const waveDataSegmentOnlyEffect = new Uint8Array(riffDataOnlyEffect);
                     Util.setLittleEndianNumberToUint8Array(waveDataSegmentOnlyEffect, 4, 4, waveDataWithEffectR.length * 4 + 44);
-                    Util.setLittleEndianNumberToUint8Array(waveDataSegmentOnlyEffect, 24, 4, bitRate); // bitrate (default : 44100Hz)
-                    Util.setLittleEndianNumberToUint8Array(waveDataSegmentOnlyEffect, 28, 4, bitRate*4); // sample rate (4byte * bitrate)
+                    Util.setLittleEndianNumberToUint8Array(waveDataSegmentOnlyEffect, 24, 4, byteRate); // bitrate (default : 44100Hz)
+                    Util.setLittleEndianNumberToUint8Array(waveDataSegmentOnlyEffect, 28, 4, byteRate*4); // sample rate (4byte * bitrate)
                     Util.setLittleEndianNumberToUint8Array(waveDataSegmentOnlyEffect, 40, 4, waveDataWithEffectR.length * 4);
                     result.waveSegmentOnlyEffect = waveDataSegmentOnlyEffect;
                 }
@@ -1250,8 +1244,8 @@ export namespace Synthesizer {
                         }
                         const channelRiffData = new Uint8Array(riffData);
                         Util.setLittleEndianNumberToUint8Array(channelRiffData, 4, 4, waveDataR.length * 4 + 44);
-                        Util.setLittleEndianNumberToUint8Array(channelRiffData, 24, 4, bitRate); // bitrate (default : 44100Hz)
-                        Util.setLittleEndianNumberToUint8Array(channelRiffData, 28, 4, bitRate*4); // sample rate (4byte * bitrate)
+                        Util.setLittleEndianNumberToUint8Array(channelRiffData, 24, 4, byteRate); // bitrate (default : 44100Hz)
+                        Util.setLittleEndianNumberToUint8Array(channelRiffData, 28, 4, byteRate*4); // sample rate (4byte * bitrate)
                         Util.setLittleEndianNumberToUint8Array(channelRiffData, 40, 4, waveDataR.length * 4);
                         channelRiffDatas.set(channelID, channelRiffData);
                     });
@@ -1365,8 +1359,10 @@ export namespace Synthesizer {
     }
 
     export class Reverber {
-        gain : number = 0.015;
-        dry  : number = 0;
+        gain      : number = 0.015;
+        dry       : number = 0;
+        frequency : number = 44100;
+        static readonly defaultFrequency = 44100;
         private _wet = 1 / 3;
         get wet() {
             return this._wet;
@@ -1413,18 +1409,18 @@ export namespace Synthesizer {
         private _LBCF2R : [FeedbackCombFilter, FeedbackCombFilter, FeedbackCombFilter, FeedbackCombFilter];
         private _APF : [AllpassFilter, AllpassFilter, AllpassFilter, AllpassFilter];
 
-        constructor() {
+        constructor(frequency : number = Reverber.defaultFrequency) {
             this._LBCF1R = [null, null, null, null];
             this._LBCF2R = [null, null, null, null];
             this._LBCF1L = [null, null, null, null];
             this._LBCF2L = [null, null, null, null];
             this._APF = [null, null, null, null];
             for(let i = 0; i < 4; i++) {
-                this._LBCF1R[i] = new FeedbackCombFilter(...this._fdnsR[i]);
-                this._LBCF2R[i] = new FeedbackCombFilter(...this._fdnsR[i+4]);
-                this._LBCF1L[i] = new FeedbackCombFilter(...this._fdnsL[i]);
-                this._LBCF2L[i] = new FeedbackCombFilter(...this._fdnsL[i+4]);
-                this._APF[i] = new AllpassFilter(...this._aps[i]);
+                this._LBCF1R[i] = new FeedbackCombFilter(this._fdnsR[i][0], this._fdnsR[i][1], Math.ceil(this._fdnsR[i][2] * frequency / Reverber.defaultFrequency));
+                this._LBCF2R[i] = new FeedbackCombFilter(this._fdnsR[i+4][0], this._fdnsR[i+4][1], Math.ceil(this._fdnsR[i+4][2] * frequency / Reverber.defaultFrequency));
+                this._LBCF1L[i] = new FeedbackCombFilter(this._fdnsL[i][0], this._fdnsL[i][1], Math.ceil(this._fdnsL[i][2] * frequency / Reverber.defaultFrequency));
+                this._LBCF2L[i] = new FeedbackCombFilter(this._fdnsL[i+4][0], this._fdnsL[i+4][1], Math.ceil(this._fdnsL[i+4][2] * frequency / Reverber.defaultFrequency));
+                this._APF[i] = new AllpassFilter(this._aps[i][0], Math.ceil(this._aps[i][1] * frequency / Reverber.defaultFrequency));
             }
         }
 

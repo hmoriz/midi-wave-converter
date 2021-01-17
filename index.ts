@@ -95,12 +95,13 @@ async function loadDLSFile(e : Event) {
 async function loadMIDIFile(e : Event) : Promise<void> {
     const outputChannelData = (document.getElementById('outputChannelCheck') as HTMLInputElement).checked;
     const withEffect = (document.getElementById('withEffect') as HTMLInputElement).checked;
+    const byteRate = (document.getElementById('byteRate') as HTMLSelectElement)?.selectedOptions?.[0]?.value || Synthesizer.defaultByteRate;
     for (let i = 0; i < (e.target as HTMLInputElement).files.length; i++) {
         const file : File = (e.target as HTMLInputElement).files[i];
         const parser = new MIDIParser();
         const parseResult = await parser.parseFile(file);
         console.log(parseResult);
-        Synthesizer.synthesizeMIDI(parseResult, dlsParseResult, withEffect, outputChannelData, Synthesizer.defaultBitRate).then((synthesizeResult) => {
+        Synthesizer.synthesizeMIDI(parseResult, dlsParseResult, withEffect, outputChannelData, Number(byteRate)).then((synthesizeResult) => {
 
             const blob = new Blob([synthesizeResult.waveSegment]);
             const url = window.URL.createObjectURL(blob);
@@ -213,6 +214,22 @@ function main() {
     input4.checked = true;
     div4.appendChild(input4);
     document.getElementById('inputarea').appendChild(div4);
+    const div5 = document.createElement('div');
+    div5.appendChild(document.createTextNode("・ サンプルレート"));
+    const select = document.createElement('select');
+    select.id = "byteRate";
+    [0.1, 0.25, 0.5, 1, 1.5, 2].forEach((num) => {
+        const byteRate = num * Synthesizer.defaultByteRate;
+        const option = document.createElement('option');
+        option.value = byteRate.toString()
+        option.text = `${byteRate} Hz`;
+        select.appendChild(option);
+        if (byteRate === Synthesizer.defaultByteRate) {
+            option.selected = true;
+        }
+    });
+    div5.appendChild(select);
+    document.getElementById('inputarea').appendChild(div5);
 
     canvas = document.createElement('canvas');
     canvas.width = 1080;
