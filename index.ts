@@ -100,44 +100,43 @@ async function loadMIDIFile(e : Event) : Promise<void> {
         const parser = new MIDIParser();
         const parseResult = await parser.parseFile(file);
         console.log(parseResult);
-        const synthesizeResult = await Synthesizer.synthesizeMIDI(parseResult, dlsParseResult, withEffect, outputChannelData);
-        const blob = new Blob([synthesizeResult.waveSegment]);
-        const url = window.URL.createObjectURL(blob);
-        const newAudio = document.createElement('audio');
-        newAudio.src = url;
-        newAudio.controls = true;
-        newAudio.loop = true;
+        Synthesizer.synthesizeMIDI(parseResult, dlsParseResult, withEffect, outputChannelData, Synthesizer.defaultBitRate).then((synthesizeResult) => {
 
-        const audioDiv = document.createElement("div");
-        audioDiv.innerText = `Result\n${file.name} => WAVE : `;
-        audioDiv.appendChild(newAudio);
-        if (withEffect) {
-            const blobWithEffect = new Blob([synthesizeResult.waveSegmentWithEffect]);
-            const urlWithEffect = window.URL.createObjectURL(blobWithEffect);
-            const newAudioWithEffect = document.createElement('audio');
-            newAudioWithEffect.src = urlWithEffect;
-            newAudioWithEffect.controls = true;
-            newAudioWithEffect.loop = true;
+            const blob = new Blob([synthesizeResult.waveSegment]);
+            const url = window.URL.createObjectURL(blob);
+            const newAudio = document.createElement('audio');
+            newAudio.src = url;
+            newAudio.controls = true;
+    
+            const audioDiv = document.createElement("div");
+            audioDiv.innerText = `Result\n${file.name} => WAVE : `;
+            audioDiv.appendChild(newAudio);
 
-            audioDiv.appendChild(document.createTextNode("    with Effect: "));
-            audioDiv.appendChild(newAudioWithEffect);
-
-            const blobOnlyEffect = new Blob([synthesizeResult.waveSegmentOnlyEffect]);
-            const urlOnlyEffect = window.URL.createObjectURL(blobOnlyEffect);
-            const newAudioOnlyEffect = document.createElement('audio');
-            newAudioOnlyEffect.src = urlOnlyEffect;
-            newAudioOnlyEffect.controls = true;
-            newAudioOnlyEffect.loop = true;
-            
-            audioDiv.appendChild(document.createTextNode("    only Effect: "));
-            audioDiv.appendChild(newAudioOnlyEffect);
-        }
-
-        const audioArea = document.getElementById("audioarea");
-        audioArea.appendChild(audioDiv);
-
-
-        if (outputChannelData) {
+            if (withEffect) {
+                const blobWithEffect = new Blob([synthesizeResult.waveSegmentWithEffect]);
+                const urlWithEffect = window.URL.createObjectURL(blobWithEffect);
+                const newAudioWithEffect = document.createElement('audio');
+                newAudioWithEffect.src = urlWithEffect;
+                newAudioWithEffect.controls = true;
+                newAudioWithEffect.loop = true;
+    
+                audioDiv.appendChild(document.createTextNode("    with Effect: "));
+                audioDiv.appendChild(newAudioWithEffect);
+    
+                const blobOnlyEffect = new Blob([synthesizeResult.waveSegmentOnlyEffect]);
+                const urlOnlyEffect = window.URL.createObjectURL(blobOnlyEffect);
+                const newAudioOnlyEffect = document.createElement('audio');
+                newAudioOnlyEffect.src = urlOnlyEffect;
+                newAudioOnlyEffect.controls = true;
+                newAudioOnlyEffect.loop = true;
+                
+                audioDiv.appendChild(document.createTextNode("    only Effect: "));
+                audioDiv.appendChild(newAudioOnlyEffect);
+            }
+    
+            const audioArea = document.getElementById("audioarea");
+            audioArea.appendChild(audioDiv);
+    
             synthesizeResult.channelToWaveSegment.forEach((waveSegment, channelID) => {
                 const div = document.createElement('div');
                 const iLocale = synthesizeResult.channelToInstrument.get(channelID)?.insh.Locale;
@@ -151,31 +150,31 @@ async function loadMIDIFile(e : Event) : Promise<void> {
                 div.appendChild(channelAudio)
                 document.getElementById("audioarea").appendChild(div);   
             });
-        }
-
-        // 先頭のサンプルチャートを雑に作成
-        const dataSize = 1000;
-        if (chart) {
-            resetChart(chart);
-        } else {
-            chart = makeChart(dataSize);
-        }
-        let firstNonZeroOffset = synthesizeResult.waveSegment.findIndex((value, offset) => offset >= 100 && value !== 0);
-        const dataset = new Uint8Array(dataSize*2);
-        for (let i = 0; i < dataSize; i++) {
-            const offset = firstNonZeroOffset + i * 1000;
-            dataset.set(synthesizeResult.waveSegment.slice(offset, offset+2), i*2);
-        }
-        addChartFromUint8ToInt16(chart, dataset);
-
-        if (withEffect) {
-            const dataset2 = new Uint8Array(dataSize*2);
+            // 先頭のサンプルチャートを雑に作成
+            const dataSize = 1000;
+            if (chart) {
+                resetChart(chart);
+            } else {
+                chart = makeChart(dataSize);
+            }
+            let firstNonZeroOffset = synthesizeResult.waveSegment.findIndex((value, offset) => offset >= 100 && value !== 0);
+            const dataset = new Uint8Array(dataSize*2);
             for (let i = 0; i < dataSize; i++) {
                 const offset = firstNonZeroOffset + i * 1000;
-                dataset2.set(synthesizeResult.waveSegmentWithEffect.slice(offset, offset+2), i*2);
+                dataset.set(synthesizeResult.waveSegment.slice(offset, offset+2), i*2);
             }
-            addChartFromUint8ToInt16(chart, dataset2);
-        }
+            addChartFromUint8ToInt16(chart, dataset);
+    
+            if (withEffect) {
+                const dataset2 = new Uint8Array(dataSize*2);
+                for (let i = 0; i < dataSize; i++) {
+                    const offset = firstNonZeroOffset + i * 1000;
+                    dataset2.set(synthesizeResult.waveSegmentWithEffect.slice(offset, offset+2), i*2);
+                }
+                addChartFromUint8ToInt16(chart, dataset2);
+            }
+        });
+
     }
 }
 
