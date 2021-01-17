@@ -34,7 +34,7 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
       - run: npm install
-      - run: rm 
+      - run: rm -rf release/
       - run: npm run build --if-present
       - name: Commit files
         run: |
