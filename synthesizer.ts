@@ -1041,50 +1041,51 @@ export namespace Synthesizer {
                         });
 
                         // 此処から先はエフェクト処理
-                        if (!withEffect) continue;
-                        // コーラス適用
-                        let delayOffsetForChorus = offsetForChorus - chorusDelay;
-                        delayOffsetForChorus -= (1+Math.sin(offset / byteRate * 2 * Math.PI * (3 * 0.122))) * (20 / 3.2 * byteRate / 1000) / 2;
-                        const deltaForChorus = delayOffsetForChorus - Math.floor(delayOffsetForChorus);
-                        delayOffsetForChorus = Math.round(delayOffsetForChorus - deltaForChorus);
-                        while (delayOffsetForChorus < 0) {
-                            delayOffsetForChorus = delayOffsetForChorus + waveDataBufferForChorusCapacity;
-                        }
-                        let delayOffsetForChorus1 = (delayOffsetForChorus+1) % waveDataBufferForChorusCapacity;
-
-                        const chorusDataR = (1-deltaForChorus) * (waveDataBufferForChorus[0][delayOffsetForChorus] || 0) + 
-                            deltaForChorus * (waveDataBufferForChorus[0][delayOffsetForChorus1] || 0);
-                        waveDataBufferForChorus[0][offsetForChorus] += chorusDataR * (8 * 0.763 * 0.01);
-                        waveDataWithEffectR[offset] += chorusDataR;
-                        waveDataOnlyEffectR[offset] += chorusDataR;
-
-                        const chorusDataL = (1-deltaForChorus) * (waveDataBufferForChorus[1][delayOffsetForChorus] || 0) + 
-                            deltaForChorus * (waveDataBufferForChorus[1][delayOffsetForChorus1] || 0);
-                        waveDataBufferForChorus[1][offsetForChorus] += chorusDataL * (8 * 0.763 * 0.01);
-                        waveDataWithEffectL[offset] += chorusDataL;
-                        waveDataOnlyEffectL[offset] += chorusDataL;
-
-                        // for debug
-                        // if (offset % 10000 <= 10) {
-                        //     console.log(offset, offsetForChorus, deltaForChorus, delayOffsetForChorus, delayOffsetForChorus1, waveDataR[offset],
-                        //         chorusDataR, chorusDataL,
-                        //         waveDataBufferForChorus[0][offsetForChorus], waveDataWithEffectR[offset]);
-                        //     //console.log(offset, waveDataBufferForChorus[0][offsetForChorus], waveDataBufferForChorus[0][delayOffsetForChorus], waveDataBufferForChorus[0][delayOffsetForChorus1], offsetForChorus, delayOffsetForChorus, delayOffsetForChorus1, waveDataWithEffectR[offset], waveDataWithEffectL[offset]);
-                        // }
-
-                        // リバーブ適用
-                        // 入力→出力の関係性はClassが全部請け負ってるのでそれを拾うのみ
-                        const [reverbOutputR, reverbOutputL] = reverber.update(waveDataBufferForReverb[0], waveDataBufferForReverb[1]);
-                        waveDataWithEffectR[offset] += reverbOutputR;
-                        waveDataOnlyEffectR[offset] += reverbOutputR;
-                        waveDataWithEffectL[offset] += reverbOutputL;
-                        waveDataOnlyEffectL[offset] += reverbOutputL;
-                        
-                        // // for debug
-                        if (offset % 10000 <= 10) {
-                            console.log(offset, waveDataBufferForReverb, reverbOutputR, reverbOutputL, reverbOutputR / waveDataBufferForReverb[0], reverber);
-                            // console.log(JSON.stringify(waveDataBufferForReverbB[0]));
-                            // console.log(JSON.stringify(waveDataBufferForReverbB[1]));
+                        if (withEffect) {
+                            // コーラス適用
+                            let delayOffsetForChorus = offsetForChorus - chorusDelay;
+                            delayOffsetForChorus -= (1+Math.sin(offset / byteRate * 2 * Math.PI * (3 * 0.122))) * (20 / 3.2 * byteRate / 1000) / 2;
+                            const deltaForChorus = delayOffsetForChorus - Math.floor(delayOffsetForChorus);
+                            delayOffsetForChorus = Math.round(delayOffsetForChorus - deltaForChorus);
+                            while (delayOffsetForChorus < 0) {
+                                delayOffsetForChorus = delayOffsetForChorus + waveDataBufferForChorusCapacity;
+                            }
+                            let delayOffsetForChorus1 = (delayOffsetForChorus+1) % waveDataBufferForChorusCapacity;
+    
+                            const chorusDataR = (1-deltaForChorus) * (waveDataBufferForChorus[0][delayOffsetForChorus] || 0) + 
+                                deltaForChorus * (waveDataBufferForChorus[0][delayOffsetForChorus1] || 0);
+                            waveDataBufferForChorus[0][offsetForChorus] += chorusDataR * (8 * 0.763 * 0.01);
+                            waveDataWithEffectR[offset] += chorusDataR;
+                            waveDataOnlyEffectR[offset] += chorusDataR;
+    
+                            const chorusDataL = (1-deltaForChorus) * (waveDataBufferForChorus[1][delayOffsetForChorus] || 0) + 
+                                deltaForChorus * (waveDataBufferForChorus[1][delayOffsetForChorus1] || 0);
+                            waveDataBufferForChorus[1][offsetForChorus] += chorusDataL * (8 * 0.763 * 0.01);
+                            waveDataWithEffectL[offset] += chorusDataL;
+                            waveDataOnlyEffectL[offset] += chorusDataL;
+    
+                            // for debug
+                            // if (offset % 10000 <= 10) {
+                            //     console.log(offset, offsetForChorus, deltaForChorus, delayOffsetForChorus, delayOffsetForChorus1, waveDataR[offset],
+                            //         chorusDataR, chorusDataL,
+                            //         waveDataBufferForChorus[0][offsetForChorus], waveDataWithEffectR[offset]);
+                            //     //console.log(offset, waveDataBufferForChorus[0][offsetForChorus], waveDataBufferForChorus[0][delayOffsetForChorus], waveDataBufferForChorus[0][delayOffsetForChorus1], offsetForChorus, delayOffsetForChorus, delayOffsetForChorus1, waveDataWithEffectR[offset], waveDataWithEffectL[offset]);
+                            // }
+    
+                            // リバーブ適用
+                            // 入力→出力の関係性はClassが全部請け負ってるのでそれを拾うのみ
+                            const [reverbOutputR, reverbOutputL] = reverber.update(waveDataBufferForReverb[0], waveDataBufferForReverb[1]);
+                            waveDataWithEffectR[offset] += reverbOutputR;
+                            waveDataOnlyEffectR[offset] += reverbOutputR;
+                            waveDataWithEffectL[offset] += reverbOutputL;
+                            waveDataOnlyEffectL[offset] += reverbOutputL;
+                            
+                            // // for debug
+                            // if (offset % 10000 <= 10) {
+                            //     console.log(offset, waveDataBufferForReverb, reverbOutputR, reverbOutputL, reverbOutputR / waveDataBufferForReverb[0], reverber);
+                            //     // console.log(JSON.stringify(waveDataBufferForReverbB[0]));
+                            //     // console.log(JSON.stringify(waveDataBufferForReverbB[1]));
+                            // }
                         }
 
                         // 最大値・最小値を集計(音割れ防止の為の対応を後でやるため, 最後にMath.maxは引数がパンクするため)
