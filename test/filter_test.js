@@ -1,6 +1,5 @@
-const Chart = require('chart.js');
 import { DFT } from '../dft';
-import { Synthesizer } from '../synthesizer';
+import { Filter } from '../filter';
 
 const num = 100000;
 
@@ -13,10 +12,11 @@ gL[0] = 1;
 gR[0] = 1;
 
 const g2 = [new Array(), new Array()];
-const c = new Synthesizer.Reverber();
+const c = new Filter.FeedbackCombFilter(f, d, N);
 let outputText = "";
 for (let i = 0; i < num; i++) {
-    [g2[0][i], g2[1][i]] = c.update(gR[i], gL[i]);
+    //[g2[0][i], g2[1][i]] = c.update(gR[i], gL[i]);
+    g2[0][i] = c.update(gL[i]);
     outputText += `${i} ${gL[i]} ${g2[0][i]} \n`;
 }
 console.log("output", outputText)
