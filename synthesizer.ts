@@ -956,7 +956,7 @@ export namespace Synthesizer {
                                         let sampleWaveDataR = sampleWaveData;
                                         let sampleWaveDataL = sampleWaveData;
                                         // Velocity Attenuation
-                                        let velocityAttenuation = Math.min(96, 20 * Math.log10(127 / noteInfo.velocity));
+                                        let velocityAttenuation = Math.min(96, 20 * Math.log10((127 ** 2) / (noteInfo.velocity ** 2)));
                                         // Volume Attenuation
                                         let volumeAttenuation = 0;
                                         if (channelInfo) {
