@@ -98,48 +98,50 @@ async function loadMIDIFile(e : Event) : Promise<void> {
         const parser = new MIDIParser();
         const parseResult = await parser.parseFile(file);
         console.log(parseResult);
-        const synthesizeResult = await Synthesizer.synthesizeMIDI(parseResult, dlsParseResult);
-        const blob = new Blob([synthesizeResult.waveSegment]);
-        const url = window.URL.createObjectURL(blob);
-        const newAudio = document.createElement('audio');
-        newAudio.src = url;
-        newAudio.controls = true;
+        Synthesizer.synthesizeMIDI(parseResult, dlsParseResult, Synthesizer.defaultBitRate).then((synthesizeResult) => {
 
-        const audioDiv = document.createElement("div");
-        audioDiv.innerText = `Result\n${file.name} => WAVE : `;
-        audioDiv.appendChild(newAudio);
-
-        const audioArea = document.getElementById("audioarea");
-        audioArea.appendChild(audioDiv);
-
-        synthesizeResult.channelToWaveSegment.forEach((waveSegment, channelID) => {
-            const div = document.createElement('div');
-            const iLocale = synthesizeResult.channelToInstrument.get(channelID)?.insh.Locale;
-            const inam = synthesizeResult.channelToInstrument.get(channelID)?.info?.dataMap.get("INAM");
-            div.innerText = `● ${channelID} (${iLocale.ulInstrument} ${iLocale.ulBank}  ${inam}):  `;
-            const blob = new Blob([waveSegment]);
+            const blob = new Blob([synthesizeResult.waveSegment]);
             const url = window.URL.createObjectURL(blob);
-            const channelAudio = document.createElement('audio');
-            channelAudio.src = url;
-            channelAudio.controls = true;
-            div.appendChild(channelAudio)
-            document.getElementById("audioarea").appendChild(div);       
-        });
-
-        // 先頭のサンプルチャートを雑に作成
-        const dataSize = 1000;
-        if (chart) {
-            resetChart(chart);
-        } else {
-            chart = makeChart(dataSize);
-        }
-        let firstNonZeroOffset = synthesizeResult.waveSegment.findIndex((value, offset) => offset >= 100 && value !== 0);
-        const dataset = new Uint8Array(dataSize*2);
-        for (let i = 0; i < dataSize; i++) {
-            const offset = firstNonZeroOffset + i * 1000;
-            dataset.set(synthesizeResult.waveSegment.slice(offset, offset+2), i*2);
-        }
-        addChartFromUint8ToInt16(chart, dataset);
+            const newAudio = document.createElement('audio');
+            newAudio.src = url;
+            newAudio.controls = true;
+    
+            const audioDiv = document.createElement("div");
+            audioDiv.innerText = `Result\n${file.name} => WAVE : `;
+            audioDiv.appendChild(newAudio);
+    
+            const audioArea = document.getElementById("audioarea");
+            audioArea.appendChild(audioDiv);
+    
+            synthesizeResult.channelToWaveSegment.forEach((waveSegment, channelID) => {
+                const div = document.createElement('div');
+                const iLocale = synthesizeResult.channelToInstrument.get(channelID)?.insh.Locale;
+                const inam = synthesizeResult.channelToInstrument.get(channelID)?.info?.dataMap.get("INAM");
+                div.innerText = `● ${channelID} (${iLocale.ulInstrument} ${iLocale.ulBank}  ${inam}):  `;
+                const blob = new Blob([waveSegment]);
+                const url = window.URL.createObjectURL(blob);
+                const channelAudio = document.createElement('audio');
+                channelAudio.src = url;
+                channelAudio.controls = true;
+                div.appendChild(channelAudio)
+                document.getElementById("audioarea").appendChild(div);       
+            });
+    
+            // 先頭のサンプルチャートを雑に作成
+            const dataSize = 1000;
+            if (chart) {
+                resetChart(chart);
+            } else {
+                chart = makeChart(dataSize);
+            }
+            let firstNonZeroOffset = synthesizeResult.waveSegment.findIndex((value, offset) => offset >= 100 && value !== 0);
+            const dataset = new Uint8Array(dataSize*2);
+            for (let i = 0; i < dataSize; i++) {
+                const offset = firstNonZeroOffset + i * 1000;
+                dataset.set(synthesizeResult.waveSegment.slice(offset, offset+2), i*2);
+            }
+            addChartFromUint8ToInt16(chart, dataset);
+        })
     }
 }
 
