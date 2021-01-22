@@ -6,6 +6,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "parcel index.html",
+    "ogg" : "python -m http.server 12345 --directory dist",
     "build": "parcel build --public-url=\".\" --out-dir=\"release\" index.html"
   },
   "author": "",
