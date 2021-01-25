@@ -8,33 +8,39 @@
 #include <vorbis/vorbisenc.h>
 #include <emscripten/emscripten.h>
 
-#ifdef _WIN32 /* We need the following two to set stdin/stdout to binary */
+#ifdef _WIN32
 #include <io.h>
 #include <fcntl.h>
 #endif
 
 #if defined(__MACOS__) && defined(__MWERKS__)
-#include <console.h>      /* CodeWarrior's Mac "command-line" support */
+#include <console.h>
 #endif
 
 #define READ 1024
-signed char readbuffer[READ*4+44]; /* out of the data segment, not the stack */
+#define READ2 16384
+signed char readbuffer[READ*4+44];
 
-int main(int argc, char* argv[]){
-  ogg_stream_state os; /* take physical pages, weld into a logical
-                          stream of packets */
-  ogg_page         og; /* one Ogg bitstream page.  Vorbis packets are inside */
-  ogg_packet       op; /* one raw packet of data for decode */
+char **readBuffer2;
+int readBuffer2Lengths[READ];
+int lengthReadBuffer2 = 0;
 
-  vorbis_info      vi; /* struct that stores all the static vorbis bitstream
-                          settings */
-  vorbis_comment   vc; /* struct that stores all the user comments */
+int main() {
+  ogg_stream_state os;
 
-  vorbis_dsp_state vd; /* central working state for the packet->PCM decoder */
-  vorbis_block     vb; /* local working space for packet->PCM decode */
+  ogg_page         og;
+  ogg_packet       op;
+
+  vorbis_info      vi;
+  vorbis_comment   vc;
+
+  vorbis_dsp_state vd;
+  vorbis_block     vb;
 
   int eos=0,ret;
   int i, founddata;
+
+  return 0;
 
   FILE *fIn, *fOut;
 
@@ -52,23 +58,10 @@ int main(int argc, char* argv[]){
   argc = ccommand(&argv); /* get a "command line" from the Mac user */
                           /* this also lets the user set stdin and stdout */
 #endif
-
-  /* we cheat on the WAV header; we just bypass 44 bytes (simplest WAV
-     header is 44 bytes) and assume that the data is 44.1khz, stereo, 16 bit
-     little endian pcm samples. This is just an example, after all. */
-
-#ifdef _WIN32 /* We need to set stdin/stdout to binary mode. Damn windows. */
-  /* if we were reading/writing a file, it would also need to in
-     binary mode, eg, fopen("file.wav","wb"); */
-  /* Beware the evil ifdef. We avoid these where we can, but this one we
-     cannot. Don't add any more, you'll probably go to hell if you do. */
+#ifdef _WIN32
   _setmode( _fileno( fIn ), _O_BINARY );
   _setmode( _fileno( fOut ), _O_BINARY );
 #endif
-
-  /* we cheat on the WAV header; we just bypass the header and never
-     verify that it matches 16bit/stereo/44.1kHz.  This is just an
-     example, after all. */
 
   readbuffer[0] = '\0';
   for (i=0, founddata=0; i<30 && ! feof(fIn) && ! ferror(fIn); i++)
@@ -82,44 +75,10 @@ int main(int argc, char* argv[]){
     }
   }
 
-  /********** Encode setup ************/
-
   vorbis_info_init(&vi);
 
-  /* choose an encoding mode.  A few possibilities commented out, one
-     actually used: */
-
-  /*********************************************************************
-   Encoding using a VBR quality mode.  The usable range is -.1
-   (lowest quality, smallest file) to 1. (highest quality, largest file).
-   Example quality mode .4: 44kHz stereo coupled, roughly 128kbps VBR
-
-   ret = vorbis_encode_init_vbr(&vi,2,44100,.4);
-
-   ---------------------------------------------------------------------
-
-   Encoding using an average bitrate mode (ABR).
-   example: 44kHz stereo coupled, average 128kbps VBR
-
-   ret = vorbis_encode_init(&vi,2,44100,-1,128000,-1);
-
-   ---------------------------------------------------------------------
-
-   Encode using a quality mode, but select that quality mode by asking for
-   an approximate bitrate.  This is not ABR, it is true VBR, but selected
-   using the bitrate interface, and then turning bitrate management off:
-
-   ret = ( vorbis_encode_setup_managed(&vi,2,44100,-1,128000,-1) ||
-           vorbis_encode_ctl(&vi,OV_ECTL_RATEMANAGE2_SET,NULL) ||
-           vorbis_encode_setup_init(&vi));
-
-   *********************************************************************/
-
+  // とりあえず 44100Hz 2Chとする (TODO: 要ヘッダ読み込み)
   ret=vorbis_encode_init_vbr(&vi,2,44100,0.1);
-
-  /* do not continue if setup failed; this can happen if we ask for a
-     mode that libVorbis does not support (eg, too low a bitrate, etc,
-     will return 'OV_EIMPL') */
 
   if(ret)exit(1);
 
@@ -131,18 +90,8 @@ int main(int argc, char* argv[]){
   vorbis_analysis_init(&vd,&vi);
   vorbis_block_init(&vd,&vb);
 
-  /* set up our packet->stream encoder */
-  /* pick a random serial number; that way we can more likely build
-     chained streams just by concatenation */
   srand(time(NULL));
   ogg_stream_init(&os,rand());
-
-  /* Vorbis streams begin with three headers; the initial header (with
-     most of the codec setup parameters) which is mandated by the Ogg
-     bitstream spec.  The second header holds any comment fields.  The
-     third header holds the bitstream codebook.  We merely need to
-     make the headers, then pass them to libvorbis one at a time;
-     libvorbis handles the additional Ogg bitstream constraints */
 
   {
     ogg_packet header;
@@ -179,36 +128,27 @@ int main(int argc, char* argv[]){
 
   while(!eos){
     long i;
+    // Wave読み込み(4 * READ バイト単位)
     long bytes=fread(readbuffer,1,READ*4, fIn); /* stereo hardwired here */
 
     if(bytes==0){
-      /* end of file.  this can be done implicitly in the mainline,
-         but it's easier to see here in non-clever fashion.
-         Tell the library we're at end of stream so that it can handle
-         the last frame and mark end of stream in the output properly */
+      // WaveのEOF -> OGG Vorbisも最終チャンクにするための処理
       vorbis_analysis_wrote(&vd,0);
-
     }else{
-      /* data to encode */
-
-      /* expose the buffer to submit data */
+      // Waveを読み込みエンコード用バッファに投入
       float **buffer=vorbis_analysis_buffer(&vd,READ);
 
-      /* uninterleave samples */
+      // チャンネル -> offset で 0~1のPCMデータを投入
       for(i=0;i<bytes/4;i++){
         buffer[0][i]=((readbuffer[i*4+1]<<8)|
                       (0x00ff&(int)readbuffer[i*4]))/32768.f;
         buffer[1][i]=((readbuffer[i*4+3]<<8)|
                       (0x00ff&(int)readbuffer[i*4+2]))/32768.f;
       }
-
-      /* tell the library how much we actually submitted */
+      // OGG Vorbis準備
       vorbis_analysis_wrote(&vd,i);
     }
 
-    /* vorbis does some data preanalysis, then divvies up blocks for
-       more involved (potentially parallel) processing.  Get a single
-       block for encoding now */
     while(vorbis_analysis_blockout(&vd,&vb)==1){
 
       /* analysis, assume we want to use bitrate management */
@@ -220,11 +160,11 @@ int main(int argc, char* argv[]){
         /* weld the packet into the bitstream */
         ogg_stream_packetin(&os,&op);
 
-        /* write out pages (if any) */
-        while(!eos){
+        // OggSチャンク単位で出力してく
+        while(!eos) {
           int result=ogg_stream_pageout(&os,&og);
           if(result==0)break;
-          fprintf(stderr, "test %d %d\n", og.header_len, og.body_len);
+          fprintf(stderr, "test %ld %ld\n", og.header_len, og.body_len);
           fwrite(og.header,1,og.header_len,fOut);
           for(i = 0; i < og.header_len; i++) {
             EM_ASM({
@@ -238,29 +178,24 @@ int main(int argc, char* argv[]){
             }, og.body[i]);
           }
 
-          /* this could be set above, but for illustrative purposes, I do
-             it here (to show that vorbis does know where the stream ends) */
-
+          // 終端チャンクだったら終了フラグ
           if(ogg_page_eos(&og))eos=1;
         }
       }
     }
   }
 
-  /* clean up and exit.  vorbis_info_clear() must be called last */
-
+  // メモリを開放してあげる (Cでは必要だった後処理)
   ogg_stream_clear(&os);
   vorbis_block_clear(&vb);
   vorbis_dsp_clear(&vd);
   vorbis_comment_clear(&vc);
   vorbis_info_clear(&vi);
 
-  /* ogg_page and ogg_packet structs always point to storage in
-     libvorbis.  They're never freed or manipulated directly */
-
   fprintf(stderr,"Done.\n");
+
+  // ブラウザ上に<audio>生成 (ASM使用)
   EM_ASM({
-    console.log(window.oggData);
     const uint8Array = Uint8Array.from(window.oggData);
     const blob = new Blob([uint8Array]);
     const url = window.URL.createObjectURL(blob);
@@ -271,4 +206,200 @@ int main(int argc, char* argv[]){
   });
 
   return(0);
+}
+
+// NOTE: メモリを溢れさせないために addReadBuffer適度回->waveToOGG->clearReadBufferを回す形を取る
+void addReadBuffer(char *waveDataPiece, int waveLength) {
+  if (!readBuffer2) {
+    readBuffer2 = calloc(1024, sizeof (char **));
+  }
+  if (!readBuffer2[lengthReadBuffer2]) {
+    readBuffer2[lengthReadBuffer2] = calloc(waveLength, sizeof (char *));
+  }
+  if (waveLength > READ2*4+44) {
+    fprintf(stderr, "size %d is over %d", waveLength, READ2*4+44);
+    return;
+  }
+  memcpy(readBuffer2[lengthReadBuffer2], waveDataPiece, waveLength);
+  readBuffer2Lengths[lengthReadBuffer2] = waveLength;
+  fprintf(stderr, "addReadBuffer %d %d %d\n", waveLength, READ2*4+44, lengthReadBuffer2);
+  lengthReadBuffer2++;
+  return;
+}
+
+void clearReadBuffer() {
+  int i;
+  fprintf(stderr, "clearReadBuffer %d\n", lengthReadBuffer2);
+  for (i = 0; i < lengthReadBuffer2; i++) {
+    free(readBuffer2[i]);
+    readBuffer2[i] = 0;
+    readBuffer2Lengths[i] = 0;
+  }
+  lengthReadBuffer2 = 0;
+}
+
+
+ogg_stream_state os2;
+
+ogg_page         og2;
+ogg_packet       op2;
+
+vorbis_info      vi2;
+vorbis_comment   vc2;
+
+vorbis_dsp_state vd2;
+vorbis_block     vb2;
+
+void waveToOGGVorbis(int firstSegment, int lastSegment) {
+  int dataOffset;
+  char headerBuffer[4];
+  int i, j, foundData, ret;
+
+
+  // 先頭がRIFFかどうか確認
+  if (firstSegment) {
+    strncpy(headerBuffer, readBuffer2[0], 4);
+    fprintf(stderr, "test2 %s, %d \n", headerBuffer, strncmp(headerBuffer, "RIFF", 4));
+    if (strncmp(headerBuffer, "RIFF", 4)) {
+      return;
+    }
+    // 'data' を探す
+    for (i=0, foundData=-1; i<100 && i < readBuffer2Lengths[0]; i++) {
+      strncpy(headerBuffer, (readBuffer2[0] + i), 4);
+      if (!strncmp(headerBuffer, "data", 4) ){
+        foundData = i+8;
+        break;
+      }
+    }
+    if (foundData < 0) {
+      return;
+    }
+
+    EM_ASM(
+      window.oggData = new Array();
+    );
+
+    vorbis_info_init(&vi2);
+    fprintf(stderr, "test1 %d %d %d %p\n", foundData, readBuffer2Lengths[0], lengthReadBuffer2, &vi2);
+
+    // とりあえず 44100Hz 2Chとする (TODO: 要ヘッダ読み込み)
+    ret=vorbis_encode_init_vbr(&vi2,2,44100,0.5);
+
+    if(ret)exit(ret);
+
+    /* add a comment */
+    vorbis_comment_init(&vc2);
+    vorbis_comment_add_tag(&vc2,"ENCODER","encoder_example.c");
+
+    /* set up the analysis state and auxiliary encoding storage */
+    vorbis_analysis_init(&vd2,&vi2);
+    vorbis_block_init(&vd2,&vb2);
+
+    srand(time(NULL));
+    ogg_stream_init(&os2,rand());
+
+    // ogg vorbis header chunk
+    {
+      ogg_packet header;
+      ogg_packet header_comm;
+      ogg_packet header_code;
+
+      vorbis_analysis_headerout(&vd2,&vc2,&header,&header_comm,&header_code);
+      ogg_stream_packetin(&os2,&header); /* automatically placed in its own
+                                          page */
+      ogg_stream_packetin(&os2,&header_comm);
+      ogg_stream_packetin(&os2,&header_code);
+
+      /* This ensures the actual
+      * audio data will start on a new page, as per spec
+      */
+      while(1) {
+        int result=ogg_stream_flush(&os2,&og2);
+        if(result==0)break;
+        for(i = 0; i < og2.header_len; i++) {
+          EM_ASM({
+            window.oggData.push($0);
+          }, og2.header[i]);
+        }
+        for(i = 0; i < og2.body_len; i++) {
+          EM_ASM({
+            window.oggData.push($0);
+          }, og2.body[i]);
+        }
+      }
+
+    }
+  }
+
+  for(j = 0; j <= lengthReadBuffer2; j++) {
+    if (lastSegment && j == lengthReadBuffer2) {
+      vorbis_analysis_wrote(&vd2, 0);
+    } else if (j == lengthReadBuffer2) {
+      break;
+    } else {
+      int dBytes = (readBuffer2Lengths[j] - (firstSegment && j == 0 ? foundData : 0)) ;
+      // fprintf(stderr, "%d %d dBytes : %d\n", j, readBuffer2Lengths[j], dBytes);
+
+      // Waveを読み込みエンコード用バッファに投入
+      float **buffer=vorbis_analysis_buffer(&vd2, dBytes/4);
+
+      // チャンネル -> offset で -1~+1のPCMデータを投入
+      for(i=0;i<dBytes/4;i++){
+        int k = firstSegment && j == 0 ? foundData : 0;
+        buffer[0][i]=(((int)readBuffer2[j][k+i*4+1]<<8)|
+                      (0x00ff&(int)readBuffer2[j][k+i*4]))/32768.f;
+        buffer[1][i]=(((int)readBuffer2[j][k+i*4+3]<<8)|
+                      (0x00ff&(int)readBuffer2[j][k+i*4+2]))/32768.f;
+      }
+      // OGG Vorbis準備
+      vorbis_analysis_wrote(&vd2, dBytes/4);
+    }
+
+    while(vorbis_analysis_blockout(&vd2,&vb2)==1){
+
+      /* analysis, assume we want to use bitrate management */
+      vorbis_analysis(&vb2,NULL);
+      vorbis_bitrate_addblock(&vb2);
+
+      while(vorbis_bitrate_flushpacket(&vd2,&op2)){
+        int eos = 0;
+
+        /* weld the packet into the bitstream */
+        ogg_stream_packetin(&os2,&op2);
+
+        // OggSチャンク単位で出力してく
+        while(!eos) {
+          int result=ogg_stream_pageout(&os2,&og2);
+          if(result==0)break;
+          fprintf(stderr, "testOggS %d %ld %ld\n", j, og2.header_len, og2.body_len);
+          for(i = 0; i < og2.header_len; i++) {
+            EM_ASM({
+              window.oggData.push($0);
+            }, og2.header[i]);
+          }
+          for(i = 0; i < og2.body_len; i++) {
+            EM_ASM({
+              window.oggData.push($0);
+            }, og2.body[i]);
+          }
+
+          // 終端チャンクだったら終了フラグ
+          if(ogg_page_eos(&og2))eos=1;
+        }
+      }
+    }
+  }
+
+
+  if (lastSegment) {
+
+    // メモリを開放してあげる (Cでは必要だった後処理)
+    ogg_stream_clear(&os2);
+    vorbis_block_clear(&vb2);
+    vorbis_dsp_clear(&vd2);
+    vorbis_comment_clear(&vc2);
+    vorbis_info_clear(&vi2);
+
+    fprintf(stderr,"Done.\n");
+  }
 }

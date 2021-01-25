@@ -5,17 +5,15 @@ SRCS_VORBIS := $(filter-out libvorbis/lib/psytune.c libvorbis/lib/tone.c libvorb
 OBJECTS_VORBIS := $(patsubst libvorbis/lib/%.c,building/libvorbis/%.o,$(SRCS_VORBIS))
 
 app : building/libogg.o building/libvorbis.o building/app.o | dist
-	$(EMCC) building/libogg.o building/libvorbis.o building/app.o -o dist/app.html -lidbfs.js --preload-file building/input -s EXIT_RUNTIME=1 -s FORCE_FILESYSTEM=1 
+	$(EMCC) building/libogg.o building/libvorbis.o building/app.o -o ./app.html -lidbfs.js --pre-js building/pre.js --post-js building/post.js --preload-file building/input -s FORCE_FILESYSTEM=1 -s EXPORTED_FUNCTIONS='["_main","_waveToOGGVorbis","_addReadBuffer","_clearReadBuffer"]'
 
 building/app.o : building/app.c
 	$(EMCC) -I libogg/include -I libvorbis/include -c $< -o $@
 
 building/libogg.o : $(OBJECTS_OGG)
-	@echo aaa $(wildcard building/libogg/*.o)
 	$(EMCC) -r $(wildcard building/libogg/*.o) -o building/libogg.o
 
 building/libvorbis.o : $(OBJECTS_VORBIS)
-	@echo aaa $(wildcard building/libvorbis/*.o)
 	$(EMCC) -r $(patsubst %,-r %,$(wildcard building/libvorbis/*.o)) -o building/libvorbis.o
 
 $(OBJECTS_OGG) : $(SRCS_OGG) | libogg/include/ogg/config_types.h building
@@ -32,6 +30,14 @@ libogg/include/ogg/config_types.h :
 
 building :
 	mkdir building
+	mkdir building/libogg
+	mkdir building/libvorbis
 
 dist :
 	mkdir dist
+
+clean :
+	@rm building/libogg/*.o
+	@rm building/libvorbis/*.o
+	@rm building/libogg.o
+	@rm building/libvorbis.o
