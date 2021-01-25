@@ -103,7 +103,9 @@ export async function loadMIDIFile(e : Event, dlsParseResult : DLSParseResult, w
         const parser = new MIDIParser();
         const parseResult = await parser.parseFile(file);
         console.log(parseResult, dlsParseResult);
-        return Synthesizer.synthesizeMIDI(parseResult, dlsParseResult, withEffect, outputChannelData, Number(byteRate)).then((synthesizeResult) => {
+        return Synthesizer.synthesizeMIDI(parseResult, dlsParseResult, withEffect, outputChannelData, Number(byteRate), (text) => {
+            document.getElementById('loading').innerText = text;
+        }).then((synthesizeResult) => {
 
             const blob = new Blob([synthesizeResult.waveSegment]);
             const url = window.URL.createObjectURL(blob);

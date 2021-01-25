@@ -17,185 +17,7 @@ var Module = typeof Module !== 'undefined' ? Module : {};
 
 // --pre-jses are emitted after the Module integration code, so that they can
 // refer to Module (if they choose; they can also define Module)
-
-  if (!Module.expectedDataFileDownloads) {
-    Module.expectedDataFileDownloads = 0;
-  }
-  Module.expectedDataFileDownloads++;
-  (function() {
-   var loadPackage = function(metadata) {
-  
-      var PACKAGE_PATH;
-      if (typeof window === 'object') {
-        PACKAGE_PATH = window['encodeURIComponent'](window.location.pathname.toString().substring(0, window.location.pathname.toString().lastIndexOf('/')) + '/');
-      } else if (typeof location !== 'undefined') {
-        // worker
-        PACKAGE_PATH = encodeURIComponent(location.pathname.toString().substring(0, location.pathname.toString().lastIndexOf('/')) + '/');
-      } else {
-        throw 'using preloaded data can only be done on a web page or in a web worker';
-      }
-      var PACKAGE_NAME = './app.data';
-      var REMOTE_PACKAGE_BASE = 'app.data';
-      if (typeof Module['locateFilePackage'] === 'function' && !Module['locateFile']) {
-        Module['locateFile'] = Module['locateFilePackage'];
-        err('warning: you defined Module.locateFilePackage, that has been renamed to Module.locateFile (using your locateFilePackage for now)');
-      }
-      var REMOTE_PACKAGE_NAME = Module['locateFile'] ? Module['locateFile'](REMOTE_PACKAGE_BASE, '') : REMOTE_PACKAGE_BASE;
-    
-      var REMOTE_PACKAGE_SIZE = metadata['remote_package_size'];
-      var PACKAGE_UUID = metadata['package_uuid'];
-    
-      function fetchRemotePackage(packageName, packageSize, callback, errback) {
-        var xhr = new XMLHttpRequest();
-        xhr.open('GET', packageName, true);
-        xhr.responseType = 'arraybuffer';
-        xhr.onprogress = function(event) {
-          var url = packageName;
-          var size = packageSize;
-          if (event.total) size = event.total;
-          if (event.loaded) {
-            if (!xhr.addedTotal) {
-              xhr.addedTotal = true;
-              if (!Module.dataFileDownloads) Module.dataFileDownloads = {};
-              Module.dataFileDownloads[url] = {
-                loaded: event.loaded,
-                total: size
-              };
-            } else {
-              Module.dataFileDownloads[url].loaded = event.loaded;
-            }
-            var total = 0;
-            var loaded = 0;
-            var num = 0;
-            for (var download in Module.dataFileDownloads) {
-            var data = Module.dataFileDownloads[download];
-              total += data.total;
-              loaded += data.loaded;
-              num++;
-            }
-            total = Math.ceil(total * Module.expectedDataFileDownloads/num);
-            if (Module['setStatus']) Module['setStatus']('Downloading data... (' + loaded + '/' + total + ')');
-          } else if (!Module.dataFileDownloads) {
-            if (Module['setStatus']) Module['setStatus']('Downloading data...');
-          }
-        };
-        xhr.onerror = function(event) {
-          throw new Error("NetworkError for: " + packageName);
-        }
-        xhr.onload = function(event) {
-          if (xhr.status == 200 || xhr.status == 304 || xhr.status == 206 || (xhr.status == 0 && xhr.response)) { // file URLs can return 0
-            var packageData = xhr.response;
-            callback(packageData);
-          } else {
-            throw new Error(xhr.statusText + " : " + xhr.responseURL);
-          }
-        };
-        xhr.send(null);
-      };
-
-      function handleError(error) {
-        console.error('package error:', error);
-      };
-    
-        var fetchedCallback = null;
-        var fetched = Module['getPreloadedPackage'] ? Module['getPreloadedPackage'](REMOTE_PACKAGE_NAME, REMOTE_PACKAGE_SIZE) : null;
-
-        if (!fetched) fetchRemotePackage(REMOTE_PACKAGE_NAME, REMOTE_PACKAGE_SIZE, function(data) {
-          if (fetchedCallback) {
-            fetchedCallback(data);
-            fetchedCallback = null;
-          } else {
-            fetched = data;
-          }
-        }, handleError);
-      
-    function runWithFS() {
-  
-      function assert(check, msg) {
-        if (!check) throw msg + new Error().stack;
-      }
-  Module['FS_createPath']("/", "building", true, true);
-
-      /** @constructor */
-      function DataRequest(start, end, audio) {
-        this.start = start;
-        this.end = end;
-        this.audio = audio;
-      }
-      DataRequest.prototype = {
-        requests: {},
-        open: function(mode, name) {
-          this.name = name;
-          this.requests[name] = this;
-          Module['addRunDependency']('fp ' + this.name);
-        },
-        send: function() {},
-        onload: function() {
-          var byteArray = this.byteArray.subarray(this.start, this.end);
-          this.finish(byteArray);
-        },
-        finish: function(byteArray) {
-          var that = this;
-  
-          Module['FS_createDataFile'](this.name, null, byteArray, true, true, true); // canOwn this data in the filesystem, it is a slide into the heap that will never change
-          Module['removeRunDependency']('fp ' + that.name);
-  
-          this.requests[this.name] = null;
-        }
-      };
-  
-          var files = metadata['files'];
-          for (var i = 0; i < files.length; ++i) {
-            new DataRequest(files[i]['start'], files[i]['end'], files[i]['audio']).open('GET', files[i]['filename']);
-          }
-  
-    
-      function processPackageData(arrayBuffer) {
-        assert(arrayBuffer, 'Loading data file failed.');
-        assert(arrayBuffer instanceof ArrayBuffer, 'bad input to processPackageData');
-        var byteArray = new Uint8Array(arrayBuffer);
-        var curr;
-        
-          // Reuse the bytearray from the XHR as the source for file reads.
-          DataRequest.prototype.byteArray = byteArray;
-    
-            var files = metadata['files'];
-            for (var i = 0; i < files.length; ++i) {
-              DataRequest.prototype.requests[files[i].filename].onload();
-            }
-                Module['removeRunDependency']('datafile_./app.data');
-
-      };
-      Module['addRunDependency']('datafile_./app.data');
-    
-      if (!Module.preloadResults) Module.preloadResults = {};
-    
-        Module.preloadResults[PACKAGE_NAME] = {fromCache: false};
-        if (fetched) {
-          processPackageData(fetched);
-          fetched = null;
-        } else {
-          fetchedCallback = processPackageData;
-        }
-      
-    }
-    if (Module['calledRun']) {
-      runWithFS();
-    } else {
-      if (!Module['preRun']) Module['preRun'] = [];
-      Module["preRun"].push(runWithFS); // FS is not initialized yet, wait for it
-    }
-  
-   }
-   loadPackage({"files": [{"filename": "/building/input", "start": 0, "end": 11260408, "audio": 0}], "remote_package_size": 11260408, "package_uuid": "87209089-86cf-4b08-8df8-4317c0d631e5"});
-  
-  })();
-  
-
-    // All the pre-js content up to here must remain later on, we need to run
-    // it.
-    var necessaryPreJSTasks = Module['preRun'].slice();
-  var statusElement = document.getElementById('status');
+var statusElement = document.getElementById('status');
 var progressElement = document.getElementById('progress');
 var spinnerElement = document.getElementById('spinner');
 
@@ -272,11 +94,6 @@ if (window) {
     };
 }
 
-    if (!Module['preRun']) throw 'Module.preRun should exist because file support used it; did a pre-js delete it?';
-    necessaryPreJSTasks.forEach(function(task) {
-      if (Module['preRun'].indexOf(task) < 0) throw 'All preRun tasks that exist before user pre-js code should remain after; did you replace Module or modify Module.preRun?';
-    });
-  
 
 // Sometimes an existing Module object exists with properties
 // meant to overwrite the default module functionality. Here
@@ -1848,8 +1665,8 @@ var tempI64;
 // === Body ===
 
 var ASM_CONSTS = {
-  565264: function() {window.oggData = new Array();},  
- 565360: function($0) {window.oggData.push($0);}
+  565205: function() {window.oggData = new Array();},  
+ 565309: function($0) {window.oggData.push($0);}
 };
 
 
@@ -4800,9 +4617,6 @@ var _clearReadBuffer = Module["_clearReadBuffer"] = createExportWrapper("clearRe
 var _waveToOGGVorbis = Module["_waveToOGGVorbis"] = createExportWrapper("waveToOGGVorbis");
 
 /** @type {function(...*):?} */
-var _main = Module["_main"] = createExportWrapper("main");
-
-/** @type {function(...*):?} */
 var _fflush = Module["_fflush"] = createExportWrapper("fflush");
 
 /** @type {function(...*):?} */
@@ -5067,54 +4881,6 @@ dependenciesFulfilled = function runCaller() {
   if (!calledRun) dependenciesFulfilled = runCaller; // try this again later, after new deps are fulfilled
 };
 
-function callMain(args) {
-  assert(runDependencies == 0, 'cannot call main when async dependencies remain! (listen on Module["onRuntimeInitialized"])');
-  assert(__ATPRERUN__.length == 0, 'cannot call main when preRun functions remain to be called');
-
-  var entryFunction = Module['_main'];
-
-  args = args || [];
-
-  var argc = args.length+1;
-  var argv = stackAlloc((argc + 1) * 4);
-  HEAP32[argv >> 2] = allocateUTF8OnStack(thisProgram);
-  for (var i = 1; i < argc; i++) {
-    HEAP32[(argv >> 2) + i] = allocateUTF8OnStack(args[i - 1]);
-  }
-  HEAP32[(argv >> 2) + argc] = 0;
-
-  try {
-
-    var ret = entryFunction(argc, argv);
-
-    // In PROXY_TO_PTHREAD builds, we should never exit the runtime below, as
-    // execution is asynchronously handed off to a pthread.
-      // if we're not running an evented main loop, it's time to exit
-      exit(ret, /* implicit = */ true);
-  }
-  catch(e) {
-    if (e instanceof ExitStatus) {
-      // exit() throws this once it's done to make sure execution
-      // has been stopped completely
-      return;
-    } else if (e == 'unwind') {
-      // running an evented main loop, don't immediately exit
-      noExitRuntime = true;
-      return;
-    } else {
-      var toLog = e;
-      if (e && typeof e === 'object' && e.stack) {
-        toLog = [e, e.stack];
-      }
-      err('exception thrown: ' + toLog);
-      quit_(1, e);
-    }
-  } finally {
-    calledMain = true;
-
-  }
-}
-
 /** @type {function(Array=)} */
 function run(args) {
   args = args || arguments_;
@@ -5149,7 +4915,7 @@ function run(args) {
 
     if (Module['onRuntimeInitialized']) Module['onRuntimeInitialized']();
 
-    if (shouldRunNow) callMain(args);
+    assert(!Module['_main'], 'compiled without a main, but one is present. if you added it from JS, use Module["onRuntimeInitialized"]');
 
     postRun();
   }
@@ -5249,11 +5015,6 @@ if (Module['preInit']) {
   }
 }
 
-// shouldRunNow refers to calling main(), not run().
-var shouldRunNow = true;
-
-if (Module['noInitialRun']) shouldRunNow = false;
-
 noExitRuntime = true;
 
 run();
@@ -5307,7 +5068,7 @@ function waveToOGG(/**@type {Uint8Array}*/array, /**@type {(value:any)=>void}*/ 
                     }
                     audioSource.start(0, 0);
                 }
-                document.body.appendChild(buttonStart);
+                document.getElementById("oggarea").appendChild(buttonStart);
                 const buttonStop = document.createElement('button');
                 buttonStop.innerText = '停止';
                 buttonStop.onclick = () => {
@@ -5315,13 +5076,13 @@ function waveToOGG(/**@type {Uint8Array}*/array, /**@type {(value:any)=>void}*/ 
                         audioSource.stop();
                     }
                 }
-                document.body.appendChild(buttonStop);
+                document.getElementById("oggarea").appendChild(buttonStop);
             });
             const audio = document.createElement('audio');
             const blob = new Blob([Uint8Array.from(window.oggData)]);
             audio.src = window.URL.createObjectURL(blob);
             audio.controls = true;
-            document.body.appendChild(audio);
+            document.getElementById("oggarea").appendChild(audio);
         }
     }
     subProcess(0);

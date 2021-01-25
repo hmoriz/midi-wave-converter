@@ -43,7 +43,7 @@ function waveToOGG(/**@type {Uint8Array}*/array, /**@type {(value:any)=>void}*/ 
                     }
                     audioSource.start(0, 0);
                 }
-                document.body.appendChild(buttonStart);
+                document.getElementById("oggarea").appendChild(buttonStart);
                 const buttonStop = document.createElement('button');
                 buttonStop.innerText = '停止';
                 buttonStop.onclick = () => {
@@ -51,13 +51,13 @@ function waveToOGG(/**@type {Uint8Array}*/array, /**@type {(value:any)=>void}*/ 
                         audioSource.stop();
                     }
                 }
-                document.body.appendChild(buttonStop);
+                document.getElementById("oggarea").appendChild(buttonStop);
             });
             const audio = document.createElement('audio');
             const blob = new Blob([Uint8Array.from(window.oggData)]);
             audio.src = window.URL.createObjectURL(blob);
             audio.controls = true;
-            document.body.appendChild(audio);
+            document.getElementById("oggarea").appendChild(audio);
         }
     }
     subProcess(0);

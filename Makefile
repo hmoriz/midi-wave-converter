@@ -5,7 +5,7 @@ SRCS_VORBIS := $(filter-out libvorbis/lib/psytune.c libvorbis/lib/tone.c libvorb
 OBJECTS_VORBIS := $(patsubst libvorbis/lib/%.c,building/libvorbis/%.o,$(SRCS_VORBIS))
 
 app : building/libogg.o building/libvorbis.o building/app.o | dist
-	$(EMCC) building/libogg.o building/libvorbis.o building/app.o -o ./app.html -lidbfs.js --pre-js building/pre.js --post-js building/post.js --preload-file building/input --shell-file building/shell.html -s FORCE_FILESYSTEM=1 -s EXPORTED_FUNCTIONS='["_main","_waveToOGGVorbis","_addReadBuffer","_clearReadBuffer"]'
+	$(EMCC) building/libogg.o building/libvorbis.o building/app.o -o ./app.html -lidbfs.js --pre-js building/pre.js --post-js building/post.js --shell-file building/shell.html -s FORCE_FILESYSTEM=1 -s EXPORTED_FUNCTIONS='["_waveToOGGVorbis","_addReadBuffer","_clearReadBuffer"]'
 
 building/app.o : building/app.c
 	$(EMCC) -I libogg/include -I libvorbis/include -c $< -o $@

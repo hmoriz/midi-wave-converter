@@ -1,21 +1,31 @@
-# midi-wave-converter
-https://hmoriz.github.io/midi-wave-converter/release  
+# midi-wave-ogg-converter
+
+- ベーシック版 https://hmoriz.github.io/midi-wave-converter/release/index.html  
+- MIDI -> WAVE -> OGG版(emscripten) https://hmoriz.github.io/midi-wave-converter/release/app.html  
+
 ブラウザ上でシンセサイズしてMIDIをwaveに変換させるwebツール(Parcelを使ってます)  
 ブラウザ上で再生することができなくなってしまったMIDIの音を、 ゲイツシンセとも言われている Microsoft GS Wavetable SW Synth をできるだけ再現しながらwaveとして再生可能なものにします。
 現時点では ~進行中のフレーム回しみたいな対応をやってない~ (追記: 多少やった) 都合でパッと見フリーズを起こすので、 デベロッパーコンソールを開いて動作させることを推奨します(ただし、 ゴミログがめちゃくちゃ多い点に注意)
 
+また、 OGG版の方では MIDIからOGGまで変換するところまでやります。 (Qualityは雑に0.5固定)
+RPGツクールMVで再生できるVorbis形式で、 emscriptenを用いてlibvorbisを実行させてます。
+MIDIに埋め込まれたループタグ(CC111)をOGGに適用させることにより、 RPGツクールシリーズでも同じループを実現させることができます。
+
 ## 使い方
+
+(OGG版も基本的には同じです。 要gm.dls)
 
 1. gm.dls のファイル選択を開いて Windowsの C:¥Windows¥System32¥drivers の中に入っていると思われる「gm.dls」を選ぶ
 2. 好きなMIDIファイルを選ぶ。なお現バージョンでは「XG音源」には対応できてないためGMな音が出ます(動作保証しないけど別のdlsファイルをツッコんだ場合は除く)
 3. 待つ。 進捗が適当に数字として表示されてるはず(重い処理が入っているため鈍くなりがちです)
-4. 生成されたものは `<audio>` で表示されるのであとは好きにしてください
+4. 生成されたものは `<audio>` で表示されるのであとは好きにしてください (OGG版では通常のAudioはループされませんが、 データとしてループタグが埋め込まれているのでoggとしてダウンロードした上でRPGツクールMV etc.にインポートすればループも織り込まれているはずです)
 
 ## 注意点
 
 * Windowsでの動作を想定していますが、 生成されるものがWAVEファイルなためgm.dlsさえ持っていればたぶんWindows以外でも動作します。
 * 所詮1人の個人がその場の勢いで作成したものなため、 正しい動作の保証は一切できないです。
 * 作者は「シミュレーションRPG95のサンプルのBGM」と「RPGツクールXPのRTP曲」で多少の動作確認をしてます。
+* OGGのループの再生は一応プレビュー機能も入れてますが、 RPGツクールMVで動作確認してます。
 * このツールを用いて生成されたwavファイルの使用許諾みたいなのはもとのMIDIファイルが配布されてたサイト等の規則に従ってください。 それをweb上にアップロードして作者と問題が発生した場合このツールの作者は何も対応できません。
 
 ## TODO
@@ -28,7 +38,9 @@ https://hmoriz.github.io/midi-wave-converter/release
 * CC64(ホールド)
 * XG対応
 * その他Windows Media Playerと明らかに異なる部分の修正
+* MIDI Synthesizer もWASMにしたほうが速そう
 
 ## その他
 
 * [Timidity++](http://timidity.sourceforge.net/) というみんな知っているであろう偉大なるツールと非公式ながらかなり洗練され2020年になってもなお更新が入っているらしい [Timidity41](https://ja.osdn.net/projects/timidity41/) というツールをかなり参考にしてます。 感謝
+* libOGG, libVorbisを使用してます(流石にVorbisエンコーダ自前実装は無理だった……)

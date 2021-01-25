@@ -329,7 +329,7 @@ export namespace Synthesizer {
         }
     }
 
-    export async function synthesizeMIDI(midi : MidiParseInfo, dls : DLSParseInfo, withEffect: boolean = true, outputChannel : boolean = true, byteRate : number = defaultByteRate) :  Promise<SynthesizeResult> {
+    export async function synthesizeMIDI(midi : MidiParseInfo, dls : DLSParseInfo, withEffect: boolean = true, outputChannel : boolean = true, byteRate : number = defaultByteRate, onProcessCallback : (text : string) => void = null) :  Promise<SynthesizeResult> {
 
         // rgn offset(number) -> art1Info(for rgn)
         const lartOffsetToArt1InfoMap = new Map<number, Art1Info>();
@@ -659,9 +659,7 @@ export namespace Synthesizer {
                 const processPartialMakeWaveSegment2 = (startOffset: number, endOffset : number) => {
                     console.log("Synthesize Processing...", startOffset, "-", endOffset, "/", Math.ceil(maxOffset));
                     // TODO : 本当はこのファイルにdocumentを使うべきでない
-                    if (document && document.getElementById('loading')) {
-                        document.getElementById('loading').innerText = `Synthesize Processing...${startOffset} / ${Math.ceil(maxOffset)}`;
-                    }
+                    onProcessCallback(`Synthesize Processing...${startOffset} / ${Math.ceil(maxOffset)}`);
 
                     const waveDataBufferForReverb : [number, number] = [0, 0]; // R L
                     for (let offset = startOffset; offset < Math.min(endOffset, maxOffset); offset++) {
