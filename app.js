@@ -187,7 +187,7 @@ var Module = typeof Module !== 'undefined' ? Module : {};
     }
   
    }
-   loadPackage({"files": [{"filename": "/building/input", "start": 0, "end": 11260408, "audio": 0}], "remote_package_size": 11260408, "package_uuid": "a7c81353-e4b3-46f9-933a-f50f070ce505"});
+   loadPackage({"files": [{"filename": "/building/input", "start": 0, "end": 11260408, "audio": 0}], "remote_package_size": 11260408, "package_uuid": "e29de0ce-7f77-432c-b103-a9888415b096"});
   
   })();
   
@@ -1849,7 +1849,7 @@ var tempI64;
 
 var ASM_CONSTS = {
   565264: function() {window.oggData = new Array();},  
- 565339: function($0) {window.oggData.push($0);}
+ 565360: function($0) {window.oggData.push($0);}
 };
 
 
@@ -5266,19 +5266,19 @@ const input = document.createElement('input');
 input.type = 'file';
 document.body.append(input);
 
-function waveToOGG(/**@type {Uint8Array}*/array, /**@type {(value:any)=>void}*/ done) {
+function waveToOGG(/**@type {Uint8Array}*/array, /**@type {(value:any)=>void}*/ done, loopStart, loopLength) {
     const segments = Math.ceil(array.byteLength / 16384);
     const segmentDiversion = 100;
     const pieceSegments = Math.trunc(segments / segmentDiversion);
     const lastSegments = segments % segmentDiversion;
-    console.log(segments, pieceSegments, lastSegments);
+    console.log(segments, pieceSegments, lastSegments, loopStart, loopLength);
 
     const subProcess = (j) => {
         for (let i = 0; i < ((j === pieceSegments) ? lastSegments : segmentDiversion); i++) {
             const array1 = Uint8Array.from(array.slice((j * segmentDiversion + i) * 16384, (j * segmentDiversion + i + 1) * 16384));
             ccall("addReadBuffer", "null", ['array', 'number'], [array1, array1.length]);
         }
-        ccall("waveToOGGVorbis", 'null', ['number', 'number'], [j === 0 ? 1 : 0, j == pieceSegments ? 1 : 0]);
+        ccall("waveToOGGVorbis", 'null', ['number', 'number', 'string', 'string'], [j === 0 ? 1 : 0, j == pieceSegments ? 1 : 0, loopStart >= 0 ? loopStart.toString() : null, loopLength >= 0 ? loopLength.toString() : null]);
         ccall("clearReadBuffer", "null", ["null"], []);
         if (!(j === pieceSegments)) {
             setTimeout(() => subProcess(j+1), 10);
@@ -5290,8 +5290,31 @@ function waveToOGG(/**@type {Uint8Array}*/array, /**@type {(value:any)=>void}*/ 
             const audio = document.createElement('audio');
             audio.src = url;
             audio.controls = true;
+            audio.loop = true;
             document.body.appendChild(audio);
-            done();
+            if (loopStart >= 0 && loopLength >= 0) {
+                let timeout;
+                audio.ontimeupdate = (ev) => {
+                    console.log(ev.target.currentTime, ev.target.duration, (loopStart + loopLength) / 44100);
+                    if (Number(ev.target.currentTime) >= (loopStart + loopLength) / 44100) {
+                        ev.target.currentTime = loopStart / 44100;
+                    }
+                    if ((loopStart + loopLength) / 44100 >= ev.target.duration && ev.target.currentTime >= ev.target.duration - 0.3) {
+                        console.log(timeout);
+                        if (timeout) {
+                            clearTimeout(timeout);
+                            timeout = 0;
+                        } else {
+                            timeout = setTimeout(() => {
+                                ev.target.currentTime = loopStart / 44100;
+                            }, 100);
+                        }
+                    }
+                }
+            }
+            if (done) {
+                done();
+            }
         }
     }
     subProcess(0);
@@ -5305,7 +5328,7 @@ input.onchange = (e) => {
             reader.onload = () => {
                 if (!(reader.result instanceof ArrayBuffer))return;
                 const array = new Uint8Array(reader.result);
-                waveToOGG(array, done);
+                waveToOGG(array, done, null, null);
             }
             reader.readAsArrayBuffer(file);
         });
@@ -5333,9 +5356,9 @@ input3.onchange = async (e) => {
     console.log(dlsResult);
     const result = await main.loadMIDIFile(e, dlsResult);
     if (document.getElementById('withEffect').checked) {
-        waveToOGG(result.waveSegmentWithEffect);
+        waveToOGG(result.waveSegmentWithEffect, null, result.loopStartOffset, result.loopLength);
     } else {
-        waveToOGG(result.waveSegment);
+        waveToOGG(result.waveSegment, null, result.loopStartOffset, result.loopLength);
     }
 }
 

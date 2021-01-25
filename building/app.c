@@ -250,11 +250,10 @@ vorbis_comment   vc2;
 vorbis_dsp_state vd2;
 vorbis_block     vb2;
 
-void waveToOGGVorbis(int firstSegment, int lastSegment) {
+void waveToOGGVorbis(int firstSegment, int lastSegment, char *loopStart, char *loopLength) {
   int dataOffset;
   char headerBuffer[4];
   int i, j, foundData, ret;
-
 
   // 先頭がRIFFかどうか確認
   if (firstSegment) {
@@ -290,6 +289,12 @@ void waveToOGGVorbis(int firstSegment, int lastSegment) {
     /* add a comment */
     vorbis_comment_init(&vc2);
     vorbis_comment_add_tag(&vc2,"ENCODER","encoder_example.c");
+    if (loopStart > 0) {
+      vorbis_comment_add_tag(&vc2, "LOOPSTART", loopStart);
+    }
+    if (loopLength > 0) {
+      vorbis_comment_add_tag(&vc2, "LOOPLENGTH", loopLength);
+    }
 
     /* set up the analysis state and auxiliary encoding storage */
     vorbis_analysis_init(&vd2,&vi2);
