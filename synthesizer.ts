@@ -647,7 +647,7 @@ export namespace Synthesizer {
                 const processPartialMakeWaveSegment2 = (startOffset: number, endOffset : number) => {
                     console.log("Synthesize Processing...", startOffset, "-", endOffset, "/", Math.ceil(maxOffset));
                     // TODO : 本当はこのファイルにdocumentを使うべきでない
-                    if (document) {
+                    if (document && document.getElementById('loading')) {
                         document.getElementById('loading').innerText = `Synthesize Processing...${startOffset} / ${Math.ceil(maxOffset)}`;
                     }
 

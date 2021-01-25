@@ -4,6 +4,7 @@ import { Synthesizer } from "./synthesizer";
 import Chart from 'chart.js';
 import { Sample } from "./sample";
 import { Util } from "./util";
+import { DLS } from "./chunk";
 
 let canvas : HTMLCanvasElement;
 let dlsParseResult : DLSParseResult;
@@ -78,7 +79,7 @@ function addChartFromUint8ToInt16(c : Chart, dataArray : Uint8Array) {
     addChartData(c, newArray);
 }
 
-async function loadDLSFile(e : Event) {
+export async function loadDLSFile(e : Event) : Promise<DLSParseResult>{
     const files = (e.target as HTMLInputElement).files;
     for (let i = 0; i < files.length; i++) {
         /** @type {File} */
@@ -89,19 +90,20 @@ async function loadDLSFile(e : Event) {
 
         // 雑にサンプル作成
         Sample.makeWaveSamples(parseResult);
+        return dlsParseResult;
     }
 }
 
-async function loadMIDIFile(e : Event) : Promise<void> {
-    const outputChannelData = (document.getElementById('outputChannelCheck') as HTMLInputElement).checked;
-    const withEffect = (document.getElementById('withEffect') as HTMLInputElement).checked;
+export async function loadMIDIFile(e : Event, dlsParseResult : DLSParseResult, withChart : boolean = false) : Promise<Synthesizer.SynthesizeResult> {
+    const outputChannelData = (document.getElementById('outputChannelCheck') as HTMLInputElement)?.checked;
+    const withEffect = (document.getElementById('withEffect') as HTMLInputElement)?.checked;
     const byteRate = (document.getElementById('byteRate') as HTMLSelectElement)?.selectedOptions?.[0]?.value || Synthesizer.defaultByteRate;
     for (let i = 0; i < (e.target as HTMLInputElement).files.length; i++) {
         const file : File = (e.target as HTMLInputElement).files[i];
         const parser = new MIDIParser();
         const parseResult = await parser.parseFile(file);
-        console.log(parseResult);
-        Synthesizer.synthesizeMIDI(parseResult, dlsParseResult, withEffect, outputChannelData, Number(byteRate)).then((synthesizeResult) => {
+        console.log(parseResult, dlsParseResult);
+        return Synthesizer.synthesizeMIDI(parseResult, dlsParseResult, withEffect, outputChannelData, Number(byteRate)).then((synthesizeResult) => {
 
             const blob = new Blob([synthesizeResult.waveSegment]);
             const url = window.URL.createObjectURL(blob);
@@ -151,42 +153,45 @@ async function loadMIDIFile(e : Event) : Promise<void> {
                 div.appendChild(channelAudio)
                 document.getElementById("audioarea").appendChild(div);   
             });
-            // 先頭のサンプルチャートを雑に作成
-            const dataSize = 1000;
-            if (chart) {
-                resetChart(chart);
-            } else {
-                chart = makeChart(dataSize);
-            }
-            let firstNonZeroOffset = synthesizeResult.waveSegment.findIndex((value, offset) => offset >= 100 && value !== 0);
-            const dataset = new Uint8Array(dataSize*2);
-            for (let i = 0; i < dataSize; i++) {
-                const offset = firstNonZeroOffset + i * 1000;
-                dataset.set(synthesizeResult.waveSegment.slice(offset, offset+2), i*2);
-            }
-            addChartFromUint8ToInt16(chart, dataset);
-    
-            if (withEffect) {
-                const dataset2 = new Uint8Array(dataSize*2);
+            if (withChart) {
+                // 先頭のサンプルチャートを雑に作成
+                const dataSize = 1000;
+                if (chart) {
+                    resetChart(chart);
+                } else {
+                    chart = makeChart(dataSize);
+                }
+                let firstNonZeroOffset = synthesizeResult.waveSegment.findIndex((value, offset) => offset >= 100 && value !== 0);
+                const dataset = new Uint8Array(dataSize*2);
                 for (let i = 0; i < dataSize; i++) {
                     const offset = firstNonZeroOffset + i * 1000;
-                    dataset2.set(synthesizeResult.waveSegmentWithEffect.slice(offset, offset+2), i*2);
+                    dataset.set(synthesizeResult.waveSegment.slice(offset, offset+2), i*2);
                 }
-                addChartFromUint8ToInt16(chart, dataset2);
+                addChartFromUint8ToInt16(chart, dataset);
+        
+                if (withEffect) {
+                    const dataset2 = new Uint8Array(dataSize*2);
+                    for (let i = 0; i < dataSize; i++) {
+                        const offset = firstNonZeroOffset + i * 1000;
+                        dataset2.set(synthesizeResult.waveSegmentWithEffect.slice(offset, offset+2), i*2);
+                    }
+                    addChartFromUint8ToInt16(chart, dataset2);
+                }
             }
+            return synthesizeResult;
         });
-
     }
 }
 
 function main() {
+    let dlsResult : DLSParseResult;
     const div1 = document.createElement('div');
     div1.innerText = '1. select "gm.dls"    ';
     const input = document.createElement('input');
     input.type = 'file';
     input.placeholder = 'gm.dls';
     input.accept = 'dls';
-    input.addEventListener('change', loadDLSFile);
+    input.addEventListener('change', async (e) => {dlsResult = await loadDLSFile(e);});
     div1.appendChild(input);
     document.getElementById('inputarea').appendChild(div1);
 
@@ -195,7 +200,7 @@ function main() {
     const input2 = document.createElement('input');
     input2.type = 'file';
     input2.accept = 'mid';
-    input2.addEventListener('change', loadMIDIFile);
+    input2.addEventListener('change', (e) => loadMIDIFile(e, dlsResult));
     div2.appendChild(input2);
     document.getElementById('inputarea').appendChild(div2);
 

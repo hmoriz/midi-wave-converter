@@ -6,7 +6,8 @@ import { Util } from "./util";
 export namespace Sample {
     // 雑にサンプル作成
     export function makeWaveSamples(dlsInfo : ParseResult) {
-        const samplingDIV = document.getElementById('sampling')
+        const samplingDIV = document.getElementById('sampling');
+        if (!samplingDIV) return;
         samplingDIV.textContent = "・ 各数値(Bank ID)をクリックすることでwaveサンプルを展開(時間がかかります)";
         const {instrumentIDNameBankMap, instrumentIDMap} = dlsInfo;
         console.log(instrumentIDMap);
