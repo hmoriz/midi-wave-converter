@@ -7,6 +7,7 @@ function waveToOGG(/**@type {Uint8Array}*/array, /**@type {(value:any)=>void}*/ 
     const segmentDiversion = 100;
     const pieceSegments = Math.trunc(segments / segmentDiversion);
     const lastSegments = segments % segmentDiversion;
+    const sampleRate = array[24] + (array[25] << 8) + (array[26] << 16) + (array[27] << 24);
     console.log(segments, pieceSegments, lastSegments, loopStart, loopLength);
     const subProcess = (j) => {
         for (let i = 0; i < ((j === pieceSegments) ? lastSegments : segmentDiversion); i++) {
@@ -19,17 +20,44 @@ function waveToOGG(/**@type {Uint8Array}*/array, /**@type {(value:any)=>void}*/ 
             setTimeout(() => subProcess(j+1), 10);
         } else {
             // audio
+            const audioContext = new AudioContext();
             const uint8Array = Uint8Array.from(window.oggData);
-            const blob = new Blob([uint8Array]);
-            const url = window.URL.createObjectURL(blob);
+            const buffer = uint8Array.buffer;
+            audioContext.decodeAudioData(buffer, (aBuffer) => {
+                if (done) {
+                    done();
+                }
+                const buttonStart = document.createElement('button');
+                buttonStart.innerText = 'loop再生';
+                /** @type {AudioBufferSourceNode} */
+                let audioSource;
+                buttonStart.onclick = () => {
+                    if (audioSource) return;
+                    audioSource = audioContext.createBufferSource();
+                    audioSource.buffer = aBuffer;
+                    audioSource.connect(audioContext.destination);
+                    audioSource.loop = true;
+                    if (loopStart >= 0 && loopLength >= 0) {
+                        audioSource.loopStart = loopStart / sampleRate;
+                        audioSource.loopEnd = (loopStart + loopLength) / sampleRate;
+                    }
+                    audioSource.start(0, 0);
+                }
+                document.body.appendChild(buttonStart);
+                const buttonStop = document.createElement('button');
+                buttonStop.innerText = '停止';
+                buttonStop.onclick = () => {
+                    if (audioSource) {
+                        audioSource.stop();
+                    }
+                }
+                document.body.appendChild(buttonStop);
+            });
             const audio = document.createElement('audio');
-            audio.src = url;
+            const blob = new Blob([Uint8Array.from(window.oggData)]);
+            audio.src = window.URL.createObjectURL(blob);
             audio.controls = true;
-            audio.loop = true;
             document.body.appendChild(audio);
-            if (done) {
-                done();
-            }
         }
     }
     subProcess(0);
