@@ -21,7 +21,7 @@
 #define READ2 16384
 signed char readbuffer[READ*4+44];
 
-char **readBuffer2;
+unsigned char **readBuffer2;
 int readBuffer2Lengths[READ];
 int lengthReadBuffer2 = 0;
 
@@ -253,18 +253,19 @@ vorbis_block     vb2;
 void waveToOGGVorbis(int firstSegment, int lastSegment, char *loopStart, char *loopLength) {
   int dataOffset;
   char headerBuffer[4];
+  int sampleRate, inputChannels;
   int i, j, foundData, ret;
 
   // 先頭がRIFFかどうか確認
   if (firstSegment) {
-    strncpy(headerBuffer, readBuffer2[0], 4);
+    strncpy(headerBuffer, (char *)(readBuffer2[0]), 4);
     fprintf(stderr, "test2 %s, %d \n", headerBuffer, strncmp(headerBuffer, "RIFF", 4));
     if (strncmp(headerBuffer, "RIFF", 4)) {
       return;
     }
     // 'data' を探す
     for (i=0, foundData=-1; i<100 && i < readBuffer2Lengths[0]; i++) {
-      strncpy(headerBuffer, (readBuffer2[0] + i), 4);
+      strncpy(headerBuffer, (char *)(readBuffer2[0] + i), 4);
       if (!strncmp(headerBuffer, "data", 4) ){
         foundData = i+8;
         break;
@@ -274,15 +275,21 @@ void waveToOGGVorbis(int firstSegment, int lastSegment, char *loopStart, char *l
       return;
     }
 
+    sampleRate = (int)readBuffer2[0][24] + 
+                 ((int)readBuffer2[0][25] << 8) +
+                 ((int)readBuffer2[0][26] << 16) +
+                 ((int)readBuffer2[0][27] << 24);
+    inputChannels = (int)(readBuffer2[0][22]); // NOTE: 本当は2byte
+
     EM_ASM(
       window.oggData = new Array();
     );
 
     vorbis_info_init(&vi2);
-    fprintf(stderr, "test1 %d %d %d %p\n", foundData, readBuffer2Lengths[0], lengthReadBuffer2, &vi2);
+    fprintf(stderr, "test1 %d %d %d %p\n", foundData, sampleRate, inputChannels, &vi2);
 
     // とりあえず 44100Hz 2Chとする (TODO: 要ヘッダ読み込み)
-    ret=vorbis_encode_init_vbr(&vi2,2,44100,0.5);
+    ret=vorbis_encode_init_vbr(&vi2,inputChannels,sampleRate,0.5);
 
     if(ret)exit(ret);
 
@@ -351,10 +358,10 @@ void waveToOGGVorbis(int firstSegment, int lastSegment, char *loopStart, char *l
       // チャンネル -> offset で -1~+1のPCMデータを投入
       for(i=0;i<dBytes/4;i++){
         int k = firstSegment && j == 0 ? foundData : 0;
-        buffer[0][i]=(((int)readBuffer2[j][k+i*4+1]<<8)|
-                      (0x00ff&(int)readBuffer2[j][k+i*4]))/32768.f;
-        buffer[1][i]=(((int)readBuffer2[j][k+i*4+3]<<8)|
-                      (0x00ff&(int)readBuffer2[j][k+i*4+2]))/32768.f;
+        buffer[0][i]=(((int)(signed char)readBuffer2[j][k+i*4+1]<<8)|
+                      (0x00ff&(int)(signed char)readBuffer2[j][k+i*4]))/32768.f;
+        buffer[1][i]=(((int)(signed char)readBuffer2[j][k+i*4+3]<<8)|
+                      (0x00ff&(int)(signed char)readBuffer2[j][k+i*4+2]))/32768.f;
       }
       // OGG Vorbis準備
       vorbis_analysis_wrote(&vd2, dBytes/4);

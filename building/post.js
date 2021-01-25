@@ -1,6 +1,6 @@
-const input = document.createElement('input');
-input.type = 'file';
-document.body.append(input);
+const inputWave = document.createElement('input');
+inputWave.type = 'file';
+document.getElementById('wavearea').append(inputWave);
 
 function waveToOGG(/**@type {Uint8Array}*/array, /**@type {(value:any)=>void}*/ done, loopStart, loopLength) {
     const segments = Math.ceil(array.byteLength / 16384);
@@ -8,7 +8,6 @@ function waveToOGG(/**@type {Uint8Array}*/array, /**@type {(value:any)=>void}*/ 
     const pieceSegments = Math.trunc(segments / segmentDiversion);
     const lastSegments = segments % segmentDiversion;
     console.log(segments, pieceSegments, lastSegments, loopStart, loopLength);
-
     const subProcess = (j) => {
         for (let i = 0; i < ((j === pieceSegments) ? lastSegments : segmentDiversion); i++) {
             const array1 = Uint8Array.from(array.slice((j * segmentDiversion + i) * 16384, (j * segmentDiversion + i + 1) * 16384));
@@ -28,24 +27,6 @@ function waveToOGG(/**@type {Uint8Array}*/array, /**@type {(value:any)=>void}*/ 
             audio.controls = true;
             audio.loop = true;
             document.body.appendChild(audio);
-            if (loopStart >= 0 && loopLength >= 0) {
-                let timeout;
-                audio.ontimeupdate = (ev) => {
-                    if (Number(ev.target.currentTime) >= (loopStart + loopLength) / 44100) {
-                        ev.target.currentTime = loopStart / 44100;
-                    }
-                    if ((loopStart + loopLength) / 44100 >= ev.target.duration && ev.target.currentTime >= ev.target.duration - 0.3) {
-                        if (timeout) {
-                            clearTimeout(timeout);
-                            timeout = 0;
-                        } else {
-                            timeout = setTimeout(() => {
-                                ev.target.currentTime = loopStart / 44100;
-                            }, 100);
-                        }
-                    }
-                }
-            }
             if (done) {
                 done();
             }
@@ -54,7 +35,7 @@ function waveToOGG(/**@type {Uint8Array}*/array, /**@type {(value:any)=>void}*/ 
     subProcess(0);
 }
 
-input.onchange = (e) => {
+inputWave.onchange = (e) => {
     for (let i = 0; i < e.target.files.length; i++) {
         const file = e.target.files[i];
         const reader = new FileReader();
@@ -71,40 +52,31 @@ input.onchange = (e) => {
 
 const main = require('./index.ts');
 
-const pElement0 = document.createElement('p');
-pElement0.appendChild(document.createTextNode('MIDI -> WAVE -> OGG'));
-const input2 = document.createElement('input');
-input2.type = 'file';
-pElement0.appendChild(input2);
+const midiElement = document.getElementById('midiarea');
+const inputDLS = document.createElement('input');
+inputDLS.type = 'file';
+midiElement.appendChild(inputDLS);
 
 let dlsResult;
-input2.onchange = async (e) => {
+inputDLS.onchange = async (e) => {
     dlsResult = await main.loadDLSFile(e);
 }
 
-const input3 = document.createElement('input');
-input3.type = 'file';
-pElement0.appendChild(input3);
+const inputMIDI = document.createElement('input');
+inputMIDI.type = 'file';
+midiElement.appendChild(inputMIDI);
 
-input3.onchange = async (e) => {
+inputMIDI.onchange = async (e) => {
     console.log(dlsResult);
+    Module.setStatus('midi -> wave converting');
     const result = await main.loadMIDIFile(e, dlsResult);
+    Module.setStatus('wave -> ogg converting');
     if (document.getElementById('withEffect').checked) {
-        waveToOGG(result.waveSegmentWithEffect, null, result.loopStartOffset, result.loopLength);
+        waveToOGG(result.waveSegmentWithEffect, () => Module.setStatus(''), result.loopStartOffset, result.loopLength);
     } else {
-        waveToOGG(result.waveSegment, null, result.loopStartOffset, result.loopLength);
+        waveToOGG(result.waveSegment, () => Module.setStatus(''), result.loopStartOffset, result.loopLength);
     }
 }
-
-document.body.appendChild(pElement0);
-
-const pElement = document.createElement('p');
-pElement.id = 'audioarea';
-document.body.appendChild(pElement);
-
-const pElement2 = document.createElement('p');
-pElement2.id = 'inputarea';
-document.body.appendChild(pElement2);
 
 const div4 = document.createElement('div');
 div4.appendChild(document.createTextNode("output by channel"));
