@@ -329,10 +329,14 @@ export namespace Synthesizer {
         }
     }
 
-    export async function synthesizeMIDI(midi : MidiParseInfo, dls : DLSParseInfo, withEffect: boolean = true, outputChannel : boolean = true, byteRate : number = defaultByteRate, onProcessCallback : (text : string) => void = null) :  Promise<SynthesizeResult> {
-
-        // rgn offset(number) -> art1Info(for rgn)
-        const lartOffsetToArt1InfoMap = new Map<number, Art1Info>();
+    export async function synthesizeMIDI(
+                midi : MidiParseInfo, 
+                dls : DLSParseInfo, 
+                withEffect: boolean = true, 
+                outputChannel : boolean = true, 
+                byteRate : number = defaultByteRate, 
+                onProcessCallback : (text : string) => void = null
+            ) :  Promise<SynthesizeResult> {
 
         // tick -> tempo change Info(number)
         const tickTempoMap = new Map<number, number>();
@@ -343,7 +347,7 @@ export namespace Synthesizer {
         // channel ID -> tick -> [Note info]
         const tickNotesMap = new Map<number, Map<number, Array<NoteInfo>>>();
         // channel ID -> Note ID -> tick
-        const channelToNoteLastTick = new Map<number, Map<number, number>>();
+        const channelToNoteLastTick = new Map<number, Map<number, Array<number>>>();
         // channel ID -> tick -> pitchBend Info (number)
         const tickPitchBendMap = new Map<number, Map<number, number>>();
 
@@ -368,26 +372,29 @@ export namespace Synthesizer {
                             tickNotesMap.get(mtrkEvent.event.channel).get(tick).push(noteInfo);
                             if(!channelToNoteLastTick.has(mtrkEvent.event.channel))channelToNoteLastTick.set(mtrkEvent.event.channel, new Map());
                             if (channelToNoteLastTick.get(mtrkEvent.event.channel).has(noteInfo.noteID)) {
-                                const lastTick = channelToNoteLastTick.get(mtrkEvent.event.channel).get(noteID);
-                                if (lastTick >= 0) {
-                                    // 前回のONイベントがOFFにならずに残っているので一つ前のtickでオフにさせる
-                                    const noteInfo = tickNotesMap.get(mtrkEvent.event.channel).get(lastTick).find(nInfo => noteID === nInfo.noteID);
+                                const lastTicks = channelToNoteLastTick.get(mtrkEvent.event.channel).get(noteID);
+                                if (lastTicks.length > 0) {
+                                    // 前回のONイベントがOFFにならずに残っているので一つ前のtickでオフにさせる(同一tickで同時にオンになっていた場合1つだけオフにする)
+                                    const lastTick = lastTicks.pop();
+                                    const noteInfo = tickNotesMap.get((mtrkEvent.event as MIDI.MIDIEvent).channel).get(lastTick).find(nInfo => noteID === nInfo.noteID && !nInfo.endTick);
                                     noteInfo.endTick = tick -1;
                                     noteInfo.notEnds = true;
                                 }
+                            } else {
+                                channelToNoteLastTick.get(mtrkEvent.event.channel).set(noteInfo.noteID, []);
                             }
-                            // 前回のONイベント更新(NoteID別)
-                            channelToNoteLastTick.get(mtrkEvent.event.channel).set(noteInfo.noteID, tick);
+                            // 前回のONイベント追加(NoteID別)
+                            channelToNoteLastTick.get(mtrkEvent.event.channel).get(noteInfo.noteID).push(tick);
                         } else {
                             // NOTE OFF
                             const noteID = mtrkEvent.event.noteID;
                             if (channelToNoteLastTick.has(mtrkEvent.event.channel)) {
                                 if (channelToNoteLastTick.get(mtrkEvent.event.channel).has(noteID)) {
-                                    const lastTick = channelToNoteLastTick.get(mtrkEvent.event.channel).get(noteID);
-                                    if (lastTick >= 0) {
-                                        const noteInfo = tickNotesMap.get(mtrkEvent.event.channel).get(lastTick).find(nInfo => noteID === nInfo.noteID);
+                                    const lastTicks = channelToNoteLastTick.get(mtrkEvent.event.channel).get(noteID);
+                                    if (lastTicks.length > 0) {
+                                        const lastTick = lastTicks.pop();
+                                        const noteInfo = tickNotesMap.get((mtrkEvent.event as MIDI.MIDIEvent).channel).get(lastTick).find(nInfo => noteID === nInfo.noteID && !nInfo.endTick);
                                         noteInfo.endTick = tick;
-                                        channelToNoteLastTick.get(mtrkEvent.event.channel).set(noteID, -1);
                                     }
                                 }
                             }
