@@ -1032,12 +1032,12 @@ export namespace Synthesizer {
                                 channelIDAttackingNoteMap.set(channelID, attackingNotes.filter(data => !!data));
 
                                 // コーラス集計
-                                if (withEffect && channelInfo.chorusLevel > 0) {
+                                if (withEffect && channelInfo && channelInfo.chorusLevel > 0) {
                                     waveDataBufferForChorus[0][offsetForChorus] += channelWaveDatas.get(channelID)[0][offsetForChannelData] * (channelInfo.chorusLevel / 127);
                                     waveDataBufferForChorus[1][offsetForChorus] += channelWaveDatas.get(channelID)[1][offsetForChannelData] * (channelInfo.chorusLevel / 127);
                                 }
                                 // リバーブ集計
-                                if (withEffect && channelInfo.reverbLevel > 0) {
+                                if (withEffect && channelInfo && channelInfo.reverbLevel > 0) {
                                     waveDataBufferForReverb[0] += channelWaveDatas.get(channelID)[0][offsetForChannelData] * (channelInfo.reverbLevel / 127);
                                     waveDataBufferForReverb[1] += channelWaveDatas.get(channelID)[1][offsetForChannelData] * (channelInfo.reverbLevel / 127);
                                 }
