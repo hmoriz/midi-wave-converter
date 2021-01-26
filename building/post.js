@@ -49,6 +49,7 @@ function waveToOGG(/**@type {Uint8Array}*/array, /**@type {(value:any)=>void}*/ 
                 buttonStop.onclick = () => {
                     if (audioSource) {
                         audioSource.stop();
+                        audioSource = null;
                     }
                 }
                 document.getElementById("oggarea").appendChild(buttonStop);
