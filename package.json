@@ -5,8 +5,8 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "parcel index.html",
-    "build": "parcel build --public-url=\".\" --out-dir=\"release\" index.html"
+    "start": "parcel index.html app.html app.data app.wasm test/filter_test.html",
+    "build": "parcel build --public-url=\".\" --out-dir=\"release\" index.html app.html app.data app.wasm test/filter_test.html"
   },
   "author": "",
   "devDependencies": {

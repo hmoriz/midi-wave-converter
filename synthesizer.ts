@@ -305,6 +305,9 @@ export namespace Synthesizer {
 
         pitchBendSensitivity : number = 2;
 
+        loopStartTick   : number = -1;
+        loopLengthTick  : number = -1;
+
         constructor(data? : Partial<ChannelInfo>) {
             Object.assign(this, data);
         }
@@ -317,13 +320,16 @@ export namespace Synthesizer {
         channelToWaveSegment  : Map<number, Uint8Array>;
         channelToInstrument   : Map<number, DLS.InsChunk>;
 
+        loopStartOffset : number = -1;
+        loopLength      : number = -1;
+
         constructor() {
             this.channelToWaveSegment = new Map();
             this.channelToInstrument = new Map();
         }
     }
 
-    export async function synthesizeMIDI(midi : MidiParseInfo, dls : DLSParseInfo, withEffect: boolean = true, outputChannel : boolean = true, byteRate : number = defaultByteRate) :  Promise<SynthesizeResult> {
+    export async function synthesizeMIDI(midi : MidiParseInfo, dls : DLSParseInfo, withEffect: boolean = true, outputChannel : boolean = true, byteRate : number = defaultByteRate, onProcessCallback : (text : string) => void = null) :  Promise<SynthesizeResult> {
 
         // rgn offset(number) -> art1Info(for rgn)
         const lartOffsetToArt1InfoMap = new Map<number, Art1Info>();
@@ -499,6 +505,12 @@ export namespace Synthesizer {
                             // RPN MSB
                             channelInfo.rpnMSB = mtrkEvent.event.value1;
                             channelInfo.usingNrpn = false;
+                        } else if (mtrkEvent.event.controlCommand === 111) {
+                            if (channelInfo.loopStartTick <= 0) {
+                                channelInfo.loopStartTick = tick;
+                            } else {
+                                channelInfo.loopLengthTick = tick - channelInfo.loopStartTick;
+                            }
                         } else {
                             console.warn("not implemented Control Command", mtrkEvent.event.channel, mtrkEvent.event.controlCommand, mtrkEvent.event);
                         }
@@ -647,9 +659,7 @@ export namespace Synthesizer {
                 const processPartialMakeWaveSegment2 = (startOffset: number, endOffset : number) => {
                     console.log("Synthesize Processing...", startOffset, "-", endOffset, "/", Math.ceil(maxOffset));
                     // TODO : 本当はこのファイルにdocumentを使うべきでない
-                    if (document) {
-                        document.getElementById('loading').innerText = `Synthesize Processing...${startOffset} / ${Math.ceil(maxOffset)}`;
-                    }
+                    onProcessCallback(`Synthesize Processing...${startOffset} / ${Math.ceil(maxOffset)}`);
 
                     const waveDataBufferForReverb : [number, number] = [0, 0]; // R L
                     for (let offset = startOffset; offset < Math.min(endOffset, maxOffset); offset++) {
@@ -1254,6 +1264,19 @@ export namespace Synthesizer {
                     result.channelToWaveSegment = channelRiffDatas;
                 }
                 result.channelToInstrument = new Map(Array.from(channelIDs).map(channelID => [channelID, channelInfoMap.get(channelID)?.[1]?.insChunk]));
+
+                // ループ設定
+                channelIDs.forEach(channelID => {
+                    const info = channelInfoMap.get(channelID);
+                    if (info[0].loopStartTick >= 0) {
+                        result.loopStartOffset = Math.round(tickToOffset.get(info[0].loopStartTick));
+                        if (info[0].loopLengthTick >= 0) {
+                            result.loopLength = Math.round(tickToOffset.get(info[0].loopLengthTick));
+                        } else {
+                            result.loopLength = Math.round(maxOffset - result.loopStartOffset);
+                        }
+                    }
+                });
 
                 done(result);
             });

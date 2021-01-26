@@ -3,3 +3,8 @@ node_modules
 dist
 gm.dls
 mid
+
+# WASM Makefile
+building/*.o
+building/**/*.o
+building/input
