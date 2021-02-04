@@ -5025,15 +5025,19 @@ run();
 
 const inputWave = document.createElement('input');
 inputWave.type = 'file';
-document.getElementById('wavearea').append(inputWave);
+document.getElementById('wavearea').appendChild(document.createTextNode("wave file: "));
+document.getElementById('wavearea').appendChild(inputWave);
+
+const subProcessSegmentSize = 16384;
 
 function waveToOGG(/**@type {Uint8Array}*/array, /**@type {(value:any)=>void}*/ done, loopStart, loopLength) {
-    const segments = Math.ceil(array.byteLength / 16384);
+    const segments = Math.ceil(array.byteLength / subProcessSegmentSize);
     const segmentDiversion = 100;
     const pieceSegments = Math.trunc(segments / segmentDiversion);
     const lastSegments = segments % segmentDiversion;
+    // sample rate from wave
     const sampleRate = array[24] + (array[25] << 8) + (array[26] << 16) + (array[27] << 24);
-    console.log(segments, pieceSegments, lastSegments, loopStart, loopLength);
+    // console.log(segments, pieceSegments, lastSegments, loopStart, loopLength);
     const subProcess = (j) => {
         for (let i = 0; i < ((j === pieceSegments) ? lastSegments : segmentDiversion); i++) {
             const array1 = Uint8Array.from(array.slice((j * segmentDiversion + i) * 16384, (j * segmentDiversion + i + 1) * 16384));
@@ -5109,6 +5113,7 @@ const main = require('./index.ts');
 const midiElement = document.getElementById('midiarea');
 const inputDLS = document.createElement('input');
 inputDLS.type = 'file';
+midiElement.appendChild(document.createTextNode("gm.dls: "));
 midiElement.appendChild(inputDLS);
 
 let dlsResult;
@@ -5118,6 +5123,7 @@ inputDLS.onchange = async (e) => {
 
 const inputMIDI = document.createElement('input');
 inputMIDI.type = 'file';
+midiElement.appendChild(document.createTextNode("midi file: "));
 midiElement.appendChild(inputMIDI);
 
 inputMIDI.onchange = async (e) => {
