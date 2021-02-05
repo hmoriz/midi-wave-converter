@@ -227,7 +227,7 @@ export namespace Synthesizer {
         if (attackTimeCent !== -2147483648) {
             attackTime = getSecondsFromArt1Scale(attackTimeCent);
         }
-        return attackTime
+        return attackTime;
     }
 
     function getEG1DecayTimeFromArt1Info(art1Info : Art1Info, noteID : number) : number {
@@ -257,7 +257,7 @@ export namespace Synthesizer {
         if (attackTimeCent !== -2147483648) {
             attackTime = getSecondsFromArt1Scale(attackTimeCent);
         }
-        return attackTime
+        return attackTime;
     }
 
     function getEG2DecayTimeFromArt1Info(art1Info : Art1Info, noteID : number) : number {
@@ -405,7 +405,7 @@ export namespace Synthesizer {
                         const lastTick = channelToInstrumentLastTick.get(mtrkEvent.event.channel);
                         let channelInfo : ChannelInfo
                         if (channelToInstrumentLastTick.has(mtrkEvent.event.channel)) {
-                            let lastInstrument = tickInstrumentMap.get(mtrkEvent.event.channel).get(lastTick)
+                            let lastInstrument = tickInstrumentMap.get(mtrkEvent.event.channel).get(lastTick);
                             channelInfo = new ChannelInfo(lastInstrument);
                         } else {
                             channelInfo = new ChannelInfo();
@@ -702,6 +702,7 @@ export namespace Synthesizer {
                         }
 
                         let tempLoopStart = -1;
+                        let tempLoopLength = -1;
                         
                         channelIDs.forEach((channelID) => {
                             channelWaveDatas.get(channelID)[0][offsetForChannelData] = 0;
@@ -720,6 +721,9 @@ export namespace Synthesizer {
                                     tempLoopStart = Math.round(tickToOffset.get(channelEvent.loopStartTick));
                                     console.log(channelID, channelEvent.loopStartTick, tempLoopStart);
                                 }
+                                if (offset < Math.ceil(maxOffset)-1 && channelEvent.loopLengthTick >= 0) {
+                                    tempLoopLength = Math.round(tickToOffset.get(channelEvent.loopLengthTick));
+                                }
                             }
                             const noteEvents = offsetNotesMap.get(channelID)?.get(offset);
                             if (noteEvents) {
@@ -735,7 +739,7 @@ export namespace Synthesizer {
                                         noteEvent.offset = offset;
                                         noteEvent.endOffset = offset + noteEvent.length;
                                         channelIDAttackingNoteMap.get(channelID).push([noteEvent, 0, 0]);
-                                    })
+                                    });
                                 }
                             }
                             let pitchBendEventMap = offsetPitchBendMap.get(channelID);
@@ -1002,7 +1006,7 @@ export namespace Synthesizer {
                                                     lfo = Math.sin((sec - art1Info.LFODelay) * Math.PI * 2 * art1Info.LFOFrequency) * art1Info.LFOToVolume;
                                                     lfoAttenuation = lfo;
                                                 }
-                                            } 
+                                            }
                                         }
                                         // WSMPのAttenuation考慮(NOTE: dB値を減衰ではなく増加させる方向で)
                                         let wsmpAttenuation = 0;
@@ -1089,22 +1093,30 @@ export namespace Synthesizer {
                             }
                         });
 
+                        // ループ開始位置獲得・修正開始
                         if (tempLoopStart >= 0) {
-                            loopStartOffset = loopAdjustOffset = tempLoopStart;
-                            if (loopAdjusting) {
-                                channelIDs.forEach((channelID) => {
-                                    // 現在再生中のNoteを記録し、 その音が消えるまでループ位置ををずらす
-                                    channelIDAttackingNoteMap.get(channelID).forEach(attackingNoteData => {
-                                        loopAnnoyingNoteMap.get(channelID).push(attackingNoteData[0]);
-                                    });
-                                    // 現在のチャンネル情報を末尾に追加
-                                    const currentChannelInfo = channelInfoMap.get(channelID)[0];
-                                    offsetChannelInfoMap.get(channelID).set(Math.ceil(maxOffset)-1, currentChannelInfo);
-                                });
-                                console.log("adjusting loop", loopStartOffset, loopAnnoyingNoteMap);
+                            loopStartOffset = tempLoopStart;
+                            if (loopStartOffset >= loopAdjustOffset) {
+                                loopAdjustOffset = loopStartOffset;
                             }
                         }
-                        if (loopAdjusting && loopStartOffset >= 0 && loopAdjustOffset === loopStartOffset) {
+                        if (loopAdjusting && tempLoopStart >= 0 && Math.abs(offset-loopStartOffset) <= 1) {
+                            console.log(tempLoopStart, offset, loopStartOffset, Math.abs(offset-loopStartOffset));
+                            channelIDs.forEach((channelID) => {
+                                // 現在再生中のNoteを記録し、 その音が消えるまでループ位置ををずらす
+                                channelIDAttackingNoteMap.get(channelID).forEach(attackingNoteData => {
+                                    loopAnnoyingNoteMap.get(channelID).push(attackingNoteData[0]);
+                                });
+                                // 現在のチャンネル情報を末尾に追加
+                                const currentChannelInfo = channelInfoMap.get(channelID)?.[0];
+                                if (currentChannelInfo) {
+                                    offsetChannelInfoMap.get(channelID).set(Math.ceil(maxOffset)-1, currentChannelInfo);
+                                }
+                            });
+                            console.log("adjusting loop", offset, loopStartOffset, loopAnnoyingNoteMap);
+                        }
+                        // ループ修正処理中・終了処理
+                        if (loopAdjusting && loopStartOffset >= 0 && loopStartOffset <= offset && loopAdjustOffset === loopStartOffset) {
                             let num = 0;
                             channelIDs.forEach((channelID) => {
                                 const attackingNotes = channelIDAttackingNoteMap.get(channelID);
@@ -1116,6 +1128,10 @@ export namespace Synthesizer {
                                 loopAdjustOffset = offset;
                                 console.log('adjusted offset', offset, loopStartOffset);
                             }
+                        }
+                        // ループ長さ獲得
+                        if (tempLoopLength >= 0) {
+                            loopLength = tempLoopLength;
                         }
 
                         // 此処から先はエフェクト処理
@@ -1175,13 +1191,13 @@ export namespace Synthesizer {
                     // NOTE : かなり雑なループなため, バグるかも
                     if (endOffset < Math.ceil(maxOffset)) {
                         setTimeout(() => {
-                            processPartialMakeWaveSegment2(endOffset,Math.min(endOffset+(endOffset-startOffset), Math.ceil(maxOffset)))
+                            processPartialMakeWaveSegment2(endOffset,Math.min(endOffset+(endOffset-startOffset), Math.ceil(maxOffset)));
                         }, 10);
                     } else {
-                        if (loopAdjusting && endOffset === Math.ceil(maxOffset) && loopAdjustOffset >= 0) {
-                            if (loopLength < 0) {
-                                loopLength = Math.ceil(maxOffset) - loopStartOffset;
-                            }
+                        if (loopLength < 0) {
+                            loopLength = Math.ceil(maxOffset) - loopStartOffset;
+                        }
+                        if (loopAdjusting && endOffset === Math.ceil(maxOffset) && loopAdjustOffset > loopStartOffset) {
                             setTimeout(() => {
                                 processPartialMakeWaveSegment2(Math.ceil(maxOffset), Math.ceil(maxOffset) + loopAdjustOffset-loopStartOffset);
                             }, 10);

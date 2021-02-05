@@ -150,8 +150,8 @@ export async function loadMIDIFile(e : Event, dlsParseResult : DLSParseResult, w
                 const channelAudio = document.createElement('audio');
                 channelAudio.src = url;
                 channelAudio.controls = true;
-                div.appendChild(channelAudio)
-                document.getElementById("audioarea").appendChild(div);   
+                div.appendChild(channelAudio);
+                document.getElementById("audioarea").appendChild(div);
             });
             if (withChart) {
                 // 先頭のサンプルチャートを雑に作成
@@ -226,7 +226,7 @@ function main() {
     [0.1, 0.25, 0.5, 1, 1.5, 2].forEach((num) => {
         const byteRate = num * Synthesizer.defaultByteRate;
         const option = document.createElement('option');
-        option.value = byteRate.toString()
+        option.value = byteRate.toString();
         option.text = `${byteRate} Hz`;
         select.appendChild(option);
         if (byteRate === Synthesizer.defaultByteRate) {
