@@ -135,7 +135,7 @@ select.id = "byteRate";
 [0.1, 0.25, 0.5, 1, 1.5, 2].forEach((num) => {
     const byteRate = num * 44100;
     const option = document.createElement('option');
-    option.value = byteRate.toString()
+    option.value = byteRate.toString();
     option.text = `${byteRate} Hz`;
     select.appendChild(option);
     if (byteRate === 44100) {

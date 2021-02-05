@@ -1108,9 +1108,9 @@ export namespace Synthesizer {
                                     loopAnnoyingNoteMap.get(channelID).push(attackingNoteData[0]);
                                 });
                                 // 現在のチャンネル情報を末尾に追加
-                                const currentChannelInfo = channelInfoMap.get(channelID)?.[0];
-                                if (currentChannelInfo) {
-                                    offsetChannelInfoMap.get(channelID).set(Math.ceil(maxOffset)-1, currentChannelInfo);
+                                const currentChannelInfos = channelInfoMap.get(channelID);
+                                if (currentChannelInfos && currentChannelInfos[0]) {
+                                    offsetChannelInfoMap.get(channelID).set(Math.ceil(maxOffset)-1, currentChannelInfos[0]);
                                 }
                             });
                             console.log("adjusting loop", offset, loopStartOffset, loopAnnoyingNoteMap);
