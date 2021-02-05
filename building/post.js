@@ -114,14 +114,14 @@ inputMIDI.onchange = async (e) => {
 }
 
 const div4 = document.createElement('div');
-div4.appendChild(document.createTextNode("output by channel"));
+div4.appendChild(document.createTextNode("- output by channel"));
 const input4 = document.createElement('input');
 input4.id = "outputChannelCheck";
 input4.type = "checkbox";
 div4.appendChild(input4);
 document.getElementById('inputarea').appendChild(div4);
 const div5 = document.createElement('div');
-div5.appendChild(document.createTextNode("enable effect"));
+div5.appendChild(document.createTextNode("- enable effect"));
 const input5 = document.createElement('input');
 input5.id = "withEffect";
 input5.type = "checkbox";
@@ -129,7 +129,7 @@ input5.checked = true;
 div5.appendChild(input5);
 document.getElementById('inputarea').appendChild(div5);
 const div6 = document.createElement('div');
-div6.appendChild(document.createTextNode("sample rate"));
+div6.appendChild(document.createTextNode("- sample rate"));
 const select = document.createElement('select');
 select.id = "byteRate";
 [0.1, 0.25, 0.5, 1, 1.5, 2].forEach((num) => {
@@ -144,3 +144,10 @@ select.id = "byteRate";
 });
 div6.appendChild(select);
 document.getElementById('inputarea').appendChild(div6);
+const div7 = document.createElement('div');
+div7.appendChild(document.createTextNode("- adjust loop offset"));
+const input7 = document.createElement('input');
+input7.id = "adjustLoop";
+input7.type = "checkbox";
+div7.appendChild(input7);
+document.getElementById('inputarea').appendChild(div7);

@@ -4,7 +4,6 @@ import { Synthesizer } from "./synthesizer";
 import Chart from 'chart.js';
 import { Sample } from "./sample";
 import { Util } from "./util";
-import { DLS } from "./chunk";
 
 let canvas : HTMLCanvasElement;
 let dlsParseResult : DLSParseResult;
@@ -98,12 +97,13 @@ export async function loadMIDIFile(e : Event, dlsParseResult : DLSParseResult, w
     const outputChannelData = (document.getElementById('outputChannelCheck') as HTMLInputElement)?.checked;
     const withEffect = (document.getElementById('withEffect') as HTMLInputElement)?.checked;
     const byteRate = (document.getElementById('byteRate') as HTMLSelectElement)?.selectedOptions?.[0]?.value || Synthesizer.defaultByteRate;
+    const adjustLoopOffset = (document.getElementById('adjustLoop') as HTMLInputElement)?.checked;
     for (let i = 0; i < (e.target as HTMLInputElement).files.length; i++) {
         const file : File = (e.target as HTMLInputElement).files[i];
         const parser = new MIDIParser();
         const parseResult = await parser.parseFile(file);
         console.log(parseResult, dlsParseResult);
-        return Synthesizer.synthesizeMIDI(parseResult, dlsParseResult, withEffect, outputChannelData, Number(byteRate), (text) => {
+        return Synthesizer.synthesizeMIDI(parseResult, dlsParseResult, withEffect, outputChannelData, adjustLoopOffset, Number(byteRate), (text) => {
             document.getElementById('loading').innerText = text;
         }).then((synthesizeResult) => {
 
@@ -123,7 +123,6 @@ export async function loadMIDIFile(e : Event, dlsParseResult : DLSParseResult, w
                 const newAudioWithEffect = document.createElement('audio');
                 newAudioWithEffect.src = urlWithEffect;
                 newAudioWithEffect.controls = true;
-                newAudioWithEffect.loop = true;
     
                 audioDiv.appendChild(document.createTextNode("    with Effect: "));
                 audioDiv.appendChild(newAudioWithEffect);
@@ -133,7 +132,6 @@ export async function loadMIDIFile(e : Event, dlsParseResult : DLSParseResult, w
                 const newAudioOnlyEffect = document.createElement('audio');
                 newAudioOnlyEffect.src = urlOnlyEffect;
                 newAudioOnlyEffect.controls = true;
-                newAudioOnlyEffect.loop = true;
                 
                 audioDiv.appendChild(document.createTextNode("    only Effect: "));
                 audioDiv.appendChild(newAudioOnlyEffect);
@@ -237,6 +235,13 @@ function main() {
     });
     div5.appendChild(select);
     document.getElementById('inputarea').appendChild(div5);
+    const div6 = document.createElement('div');
+    div6.appendChild(document.createTextNode("・ ループ補正を有効にする"));
+    const input6 = document.createElement('input');
+    input6.id = "adjustLoop";
+    input6.type = "checkbox";
+    div6.appendChild(input6);
+    document.getElementById('inputarea').appendChild(div6);
 
     canvas = document.createElement('canvas');
     canvas.width = 1080;
