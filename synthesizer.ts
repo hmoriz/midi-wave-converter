@@ -227,7 +227,7 @@ export namespace Synthesizer {
         if (attackTimeCent !== -2147483648) {
             attackTime = getSecondsFromArt1Scale(attackTimeCent);
         }
-        return attackTime
+        return attackTime;
     }
 
     function getEG1DecayTimeFromArt1Info(art1Info : Art1Info, noteID : number) : number {
@@ -257,7 +257,7 @@ export namespace Synthesizer {
         if (attackTimeCent !== -2147483648) {
             attackTime = getSecondsFromArt1Scale(attackTimeCent);
         }
-        return attackTime
+        return attackTime;
     }
 
     function getEG2DecayTimeFromArt1Info(art1Info : Art1Info, noteID : number) : number {
@@ -276,6 +276,7 @@ export namespace Synthesizer {
     }
 
     class NoteInfo {
+        offset            : number;
         noteID            : number;
         velocity          : number;
         endTick           : number;
@@ -330,11 +331,12 @@ export namespace Synthesizer {
     }
 
     export async function synthesizeMIDI(
-                midi : MidiParseInfo, 
-                dls : DLSParseInfo, 
-                withEffect: boolean = true, 
-                outputChannel : boolean = true, 
-                byteRate : number = defaultByteRate, 
+                midi : MidiParseInfo,
+                dls : DLSParseInfo,
+                withEffect: boolean = true,
+                outputChannel : boolean = true,
+                loopAdjusting : boolean = false,
+                byteRate : number = defaultByteRate,
                 onProcessCallback : (text : string) => void = null
             ) :  Promise<SynthesizeResult> {
 
@@ -403,7 +405,7 @@ export namespace Synthesizer {
                         const lastTick = channelToInstrumentLastTick.get(mtrkEvent.event.channel);
                         let channelInfo : ChannelInfo
                         if (channelToInstrumentLastTick.has(mtrkEvent.event.channel)) {
-                            let lastInstrument = tickInstrumentMap.get(mtrkEvent.event.channel).get(lastTick)
+                            let lastInstrument = tickInstrumentMap.get(mtrkEvent.event.channel).get(lastTick);
                             channelInfo = new ChannelInfo(lastInstrument);
                         } else {
                             channelInfo = new ChannelInfo();
@@ -598,6 +600,7 @@ export namespace Synthesizer {
             map.forEach((noteInfoArray, tick) => {
                 noteInfoArray.forEach(noteInfo => {
                     const offset = Math.trunc(tickToOffset.get(tick));
+                    noteInfo.offset = offset;
                     let endOffset : number;
                     if (noteInfo.endTick) {
                         endOffset = Math.trunc(tickToOffset.get(noteInfo.endTick));
@@ -635,13 +638,21 @@ export namespace Synthesizer {
         // channelID -> [waveDataR(Int16Array), waveDataL(Int16Array)]
         const channelWaveDatas = new Map<number, [Array<number>, Array<number>]>();
 
-        // channelID -> Array[attacked offset, valocity, sample_offset_speed_gain, last_sample_offset]
-        const channelIDAttackingNoteMap = new Map<number, Array<[number, NoteInfo, number, number]>>();
-        // channelID -> [ChannelInfo, wave, art1Info(for ins), lart(for ins)]
-        const channelInfoMap = new Map<number, [ChannelInfo, InstrumentData, Art1Info, DLS.LartChunk]>();
+        // channelID -> Array[NoteInfo, sample_offset_speed_gain, last_sample_offset]
+        const channelIDAttackingNoteMap = new Map<number, Array<[NoteInfo, number, number]>>();
+        // channelID -> [ChannelInfo, wave]
+        const channelInfoMap = new Map<number, [ChannelInfo, InstrumentData]>();
+
+        let loopStartOffset = -1;
+        let loopLength = -1;
+        let loopAdjustOffset = -1;
+        // channelID -> [NoteInfo]
+        const loopAnnoyingNoteMap = new Map<number, Array<NoteInfo>>();
+
         channelIDs.forEach(channelID => {
             channelIDAttackingNoteMap.set(channelID, new Array());
             channelWaveDatas.set(channelID, [new Array(), new Array()]);
+            loopAnnoyingNoteMap.set(channelID, new Array());
         });
         // channelID -> pitchBend(number)
         const pitchBendMap = new Map<number, number>();
@@ -663,13 +674,14 @@ export namespace Synthesizer {
 
         const processPartialMakeWaveSegment = (startOffset : number, endOffset : number) : Promise<void> => {
             return new Promise<void>((done) => {
+                let loopAdjustFlag = false;
                 const processPartialMakeWaveSegment2 = (startOffset: number, endOffset : number) => {
                     console.log("Synthesize Processing...", startOffset, "-", endOffset, "/", Math.ceil(maxOffset));
                     // TODO : 本当はこのファイルにdocumentを使うべきでない
                     onProcessCallback(`Synthesize Processing...${startOffset} / ${Math.ceil(maxOffset)}`);
 
                     const waveDataBufferForReverb : [number, number] = [0, 0]; // R L
-                    for (let offset = startOffset; offset < Math.min(endOffset, maxOffset); offset++) {
+                    for (let offset = startOffset; offset < Math.min(endOffset, Math.ceil(maxOffset)+ (loopAdjusting?(loopAdjustOffset-loopStartOffset):0)); offset++) {
                         waveDataR[offset] = 0;
                         waveDataL[offset] = 0;
                         const offsetForChorus = offset % waveDataBufferForChorusCapacity;
@@ -688,45 +700,73 @@ export namespace Synthesizer {
                         if (!outputChannel) {
                             offsetForChannelData = offset % 256;
                         }
+
+                        let tempLoopStart = -1;
+                        let tempLoopLength = -1;
                         
                         channelIDs.forEach((channelID) => {
                             channelWaveDatas.get(channelID)[0][offsetForChannelData] = 0;
                             channelWaveDatas.get(channelID)[1][offsetForChannelData] = 0;
                             // if (channelID !== 0) return; // 仮置
-                            const channelEvent = offsetChannelInfoMap.get(channelID)?.get(offset);
+                            let channelEvent = offsetChannelInfoMap.get(channelID)?.get(offset);
+                            if (offset >= maxOffset && loopAdjusting) {
+                                const adjustOffset = loopStartOffset + (offset - Math.ceil(maxOffset))-1;
+                                channelEvent = offsetChannelInfoMap.get(channelID)?.get(adjustOffset);
+                            }
                             if (channelEvent) {
                                 /** @ts-ignore  */
-                                const channelInfoData = dls.instrumentIDMap.get(channelEvent.instrumentID)?.get(channelID === 9 ? 2147483648 : channelEvent.bankID);
-                                const art1Info = getArt1InfoFromLarts(channelInfoData.insChunk.lart);
-                                channelInfoMap.set(channelID, [channelEvent, channelInfoData, art1Info, channelInfoData.insChunk.lart]);
+                                const instrumentData = dls.instrumentIDMap.get(channelEvent.instrumentID)?.get(channelID === 9 ? 2147483648 : channelEvent.bankID);
+                                channelInfoMap.set(channelID, [channelEvent, instrumentData]);
+                                if (offset < Math.ceil(maxOffset)-1 && channelEvent.loopStartTick >= 0) {
+                                    tempLoopStart = Math.round(tickToOffset.get(channelEvent.loopStartTick));
+                                    console.log(channelID, channelEvent.loopStartTick, tempLoopStart);
+                                }
+                                if (offset < Math.ceil(maxOffset)-1 && channelEvent.loopLengthTick >= 0) {
+                                    tempLoopLength = Math.round(tickToOffset.get(channelEvent.loopLengthTick));
+                                }
                             }
                             const noteEvents = offsetNotesMap.get(channelID)?.get(offset);
                             if (noteEvents) {
                                 noteEvents.forEach(noteEvent => {
-                                    channelIDAttackingNoteMap.get(channelID).push([offset, noteEvent, 0, 0]);
+                                    channelIDAttackingNoteMap.get(channelID).push([noteEvent, 0, 0]);
                                 })
                             }
-                            const pitchBendEventMap = offsetPitchBendMap.get(channelID);
+                            if (offset >= maxOffset && loopAdjusting) {
+                                const adjustOffset = loopStartOffset + (offset - Math.ceil(maxOffset))-1;
+                                const addingNoteEvents = offsetNotesMap.get(channelID)?.get(adjustOffset);
+                                if (addingNoteEvents) {
+                                    addingNoteEvents.forEach(noteEvent => {
+                                        noteEvent.offset = offset;
+                                        noteEvent.endOffset = offset + noteEvent.length;
+                                        channelIDAttackingNoteMap.get(channelID).push([noteEvent, 0, 0]);
+                                    });
+                                }
+                            }
+                            let pitchBendEventMap = offsetPitchBendMap.get(channelID);
                             if (pitchBendEventMap && pitchBendEventMap.has(offset)) {
                                 const pitchBendEvent =  pitchBendEventMap.get(offset);
                                 pitchBendMap.set(channelID, pitchBendEvent);
+                            } else if (pitchBendEventMap && offset >= maxOffset && loopAdjusting) {
+                                const adjustOffset = loopStartOffset + (offset - Math.ceil(maxOffset))-1;
+                                if (pitchBendEventMap.has(adjustOffset)) {
+                                    const pitchBendEvent =  pitchBendEventMap.get(adjustOffset);
+                                    pitchBendMap.set(channelID, pitchBendEvent);
+                                }
                             }
-            
                             // 現在Onになっているノートに対してサンプルを収集しwaveDataに格納してく
                             let attackingNotes = channelIDAttackingNoteMap.get(channelID);
                             if (attackingNotes.length >= 1) {
                                 const channelData = channelInfoMap.get(channelID);
                                 let channelInfo : ChannelInfo;
                                 let instrumentData : InstrumentData;
-                                let art1Info       : Art1Info;
-                                let lart           : DLS.LartChunk;
                                 if (channelData) {
-                                    [channelInfo, instrumentData, art1Info, lart] = channelInfoMap.get(channelID);
+                                    [channelInfo, instrumentData] = channelInfoMap.get(channelID);
                                 }
                                 attackingNotes.forEach((attackingNoteData, arrayIndex) => {
                                     if (!channelData) return;
                                     if (!attackingNoteData) return;
-                                    const [attackedOffset, noteInfo, sampleOffsetSpeedGain, lastSampleOffset] = attackingNoteData;
+                                    const [noteInfo, sampleOffsetSpeedGain, lastSampleOffset] = attackingNoteData;
+                                    const attackedOffset = noteInfo.offset;
                                     const noteID = noteInfo.noteID;
                                     const position = offset - attackedOffset;
                                     const positionFromReleased = offset - noteInfo.endOffset;
@@ -744,10 +784,14 @@ export namespace Synthesizer {
                                         attackingNotes[arrayIndex] = null;
                                         return;
                                     }
-                                    if (!lart && rgn.lart) {
+                                    let art1Info : Art1Info;
+                                    if (instrumentData.insChunk.lart) {
+                                        art1Info = getArt1InfoFromLarts(instrumentData.insChunk.lart);
+                                    }
+                                    if (!instrumentData.insChunk.lart && rgn.lart) {
                                         // ins直属のlartが存在しない -> regionごとのlartのほうを取得(with cache)
                                         art1Info = getArt1InfoFromLarts(rgn.lart);
-                                    } else if (!lart && !rgn.lart) {
+                                    } else if (!instrumentData.insChunk.lart && !rgn.lart) {
                                         // TODO: 一応このケースも想定する必要あり(gm.dlsにはない)
                                         console.error("no ins lart nor rgn lart", channelInfo.instrumentID, rgn);
                                         return;
@@ -875,7 +919,8 @@ export namespace Synthesizer {
                                         }
                                         // サンプル側の取得するべきオフセットを取得(ピッチによる変動を考慮済み)
                                         let sampleOffset = Math.max(0, (lastSampleOffset + sampleOffsetDefaultSpeed * freqRate * nextSampleOffsetSpeedGain));
-                                        channelIDAttackingNoteMap.get(channelID)[arrayIndex] = [attackedOffset, noteInfo, nextSampleOffsetSpeedGain, sampleOffset];
+                                        // speedとOffset更新
+                                        channelIDAttackingNoteMap.get(channelID)[arrayIndex] = [noteInfo, nextSampleOffsetSpeedGain, sampleOffset];
                                         
                                         // サンプルwaveのループ部分
                                         if (waveLooping && sampleOffset >= (waveLoopStart + waveLoopLength)) {
@@ -961,7 +1006,7 @@ export namespace Synthesizer {
                                                     lfo = Math.sin((sec - art1Info.LFODelay) * Math.PI * 2 * art1Info.LFOFrequency) * art1Info.LFOToVolume;
                                                     lfoAttenuation = lfo;
                                                 }
-                                            } 
+                                            }
                                         }
                                         // WSMPのAttenuation考慮(NOTE: dB値を減衰ではなく増加させる方向で)
                                         let wsmpAttenuation = 0;
@@ -1006,15 +1051,6 @@ export namespace Synthesizer {
                                         }
                                         waveDataR[offset] += sampleWaveDataR;
                                         waveDataL[offset] += sampleWaveDataL;
-                                        channelWaveDatas.get(channelID)[0][offset] += sampleWaveDataR;
-                                        channelWaveDatas.get(channelID)[1][offset] += sampleWaveDataL;
-                                        // console.log(offset, attackedOffset, noteInfo, positionDX, art1Info, wsmp, position, sampleOffset, freqRate, sampleWaveData, eg1Velocity, waveLoopLength, waveLoopStart, waveInfo.wave.pcmData.length);
-                                        if (sec >= 1 && eg1Attenuation + velocityAttenuation + wsmpAttenuation + lfoAttenuation + volumeAttenuation + expressionAttenuation >= 96) {
-                                            // なり始めてから時間がそれなりに経ち音量が下がりきってる -> 配列から除去(計算の対象外とする)
-                                            attackingNotes[arrayIndex] = null;
-                                        }
-                                        waveDataR[offset] += sampleWaveDataR;
-                                        waveDataL[offset] += sampleWaveDataL;
                                         waveDataWithEffectR[offset] += sampleWaveDataR;
                                         waveDataWithEffectL[offset] += sampleWaveDataL;
 
@@ -1056,6 +1092,47 @@ export namespace Synthesizer {
                                 }
                             }
                         });
+
+                        // ループ開始位置獲得・修正開始
+                        if (tempLoopStart >= 0) {
+                            loopStartOffset = tempLoopStart;
+                            if (loopStartOffset >= loopAdjustOffset) {
+                                loopAdjustOffset = loopStartOffset;
+                            }
+                        }
+                        if (loopAdjusting && tempLoopStart >= 0 && Math.abs(offset-loopStartOffset) <= 1) {
+                            console.log(tempLoopStart, offset, loopStartOffset, Math.abs(offset-loopStartOffset));
+                            channelIDs.forEach((channelID) => {
+                                // 現在再生中のNoteを記録し、 その音が消えるまでループ位置ををずらす
+                                channelIDAttackingNoteMap.get(channelID).forEach(attackingNoteData => {
+                                    loopAnnoyingNoteMap.get(channelID).push(attackingNoteData[0]);
+                                });
+                                // 現在のチャンネル情報を末尾に追加
+                                const currentChannelInfos = channelInfoMap.get(channelID);
+                                if (currentChannelInfos && currentChannelInfos[0]) {
+                                    offsetChannelInfoMap.get(channelID).set(Math.ceil(maxOffset)-1, currentChannelInfos[0]);
+                                }
+                            });
+                            console.log("adjusting loop", offset, loopStartOffset, loopAnnoyingNoteMap);
+                        }
+                        // ループ修正処理中・終了処理
+                        if (loopAdjusting && loopStartOffset >= 0 && loopStartOffset <= offset && loopAdjustOffset === loopStartOffset) {
+                            let num = 0;
+                            channelIDs.forEach((channelID) => {
+                                const attackingNotes = channelIDAttackingNoteMap.get(channelID);
+                                const annoyingNotes = loopAnnoyingNoteMap.get(channelID);
+                                loopAnnoyingNoteMap.set(channelID, annoyingNotes.filter(note => attackingNotes.findIndex((data) => data[0] === note) >= 0));
+                                num += loopAnnoyingNoteMap.get(channelID).length;
+                            });
+                            if (num === 0) {
+                                loopAdjustOffset = offset;
+                                console.log('adjusted offset', offset, loopStartOffset);
+                            }
+                        }
+                        // ループ長さ獲得
+                        if (tempLoopLength >= 0) {
+                            loopLength = tempLoopLength;
+                        }
 
                         // 此処から先はエフェクト処理
                         if (withEffect) {
@@ -1112,11 +1189,20 @@ export namespace Synthesizer {
                         }
                     }
                     // NOTE : かなり雑なループなため, バグるかも
-                    if (endOffset < maxOffset) {
+                    if (endOffset < Math.ceil(maxOffset)) {
                         setTimeout(() => {
-                            processPartialMakeWaveSegment2(endOffset, endOffset+(endOffset-startOffset));
+                            processPartialMakeWaveSegment2(endOffset,Math.min(endOffset+(endOffset-startOffset), Math.ceil(maxOffset)));
                         }, 10);
                     } else {
+                        if (loopLength < 0) {
+                            loopLength = Math.ceil(maxOffset) - loopStartOffset;
+                        }
+                        if (loopAdjusting && endOffset === Math.ceil(maxOffset) && loopAdjustOffset > loopStartOffset) {
+                            setTimeout(() => {
+                                processPartialMakeWaveSegment2(Math.ceil(maxOffset), Math.ceil(maxOffset) + loopAdjustOffset-loopStartOffset);
+                            }, 10);
+                            return;
+                        }
                         console.log("processPartialMakeWaveSegment done!");
                         done();
                     }
@@ -1132,7 +1218,7 @@ export namespace Synthesizer {
                 const correctRate = Math.min(32767 / waveDataMaxMin[0], -32768 / waveDataMaxMin[1]);
                 //console.log(waveDataRMax, waveDataRMin, correctRate);
                 if (correctRate < 1) {
-                    for (let offset = 0; offset < maxOffset; offset++) {
+                    for (let offset = 0; offset < maxOffset+(loopAdjusting?(loopAdjustOffset-loopStartOffset):0); offset++) {
                         waveDataR[offset] = Math.round(waveDataR[offset] *  correctRate * 0.99);
                         waveDataL[offset] = Math.round(waveDataL[offset] *  correctRate * 0.99);
                         waveDataWithEffectR[offset] = Math.round(waveDataWithEffectR[offset] *  correctRate * 0.99);
@@ -1273,17 +1359,10 @@ export namespace Synthesizer {
                 result.channelToInstrument = new Map(Array.from(channelIDs).map(channelID => [channelID, channelInfoMap.get(channelID)?.[1]?.insChunk]));
 
                 // ループ設定
-                channelIDs.forEach(channelID => {
-                    const info = channelInfoMap.get(channelID);
-                    if (info[0].loopStartTick >= 0) {
-                        result.loopStartOffset = Math.round(tickToOffset.get(info[0].loopStartTick));
-                        if (info[0].loopLengthTick >= 0) {
-                            result.loopLength = Math.round(tickToOffset.get(info[0].loopLengthTick));
-                        } else {
-                            result.loopLength = Math.round(maxOffset - result.loopStartOffset);
-                        }
-                    }
-                });
+                if (loopStartOffset >= 0) {
+                    result.loopStartOffset = loopAdjusting ? loopAdjustOffset : loopStartOffset;
+                    result.loopLength = loopLength;
+                }
 
                 done(result);
             });
