@@ -5043,7 +5043,7 @@ function waveToOGG(/**@type {Uint8Array}*/array, /**@type {(value:any)=>void}*/ 
             const array1 = Uint8Array.from(array.slice((j * segmentDiversion + i) * 16384, (j * segmentDiversion + i + 1) * 16384));
             ccall("addReadBuffer", "null", ['array', 'number'], [array1, array1.length]);
         }
-        ccall("waveToOGGVorbis", 'null', ['number', 'number', 'string', 'string'], [j === 0 ? 1 : 0, j == pieceSegments ? 1 : 0, loopStart >= 0 ? loopStart.toString() : null, loopLength >= 0 ? loopLength.toString() : null]);
+        ccall("waveToOGGVorbis", 'null', ['number', 'number', 'string', 'string'], [j === 0 ? 1 : 0, j == pieceSegments ? 1 : 0, loopStart && loopStart >= 0 ? loopStart.toString() : null, loopLength && loopLength >= 0 ? loopLength.toString() : null]);
         ccall("clearReadBuffer", "null", ["null"], []);
         if (!(j === pieceSegments)) {
             setTimeout(() => subProcess(j+1), 10);
