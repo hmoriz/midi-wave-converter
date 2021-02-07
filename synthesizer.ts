@@ -769,11 +769,9 @@ export namespace Synthesizer {
                                     [channelInfo] = channelInfoMap.get(channelID);
                                 }
                                 attackingNotes.forEach((attackingNoteData, arrayIndex) => {
-                                    let instrumentData : InstrumentData;
                                     if (!channelData) return;
                                     if (!attackingNoteData) return;
-                                    const [noteInfo, attackingInstrumentData, sampleOffsetSpeedGain, lastSampleOffset] = attackingNoteData;
-                                    instrumentData = attackingInstrumentData;
+                                    const [noteInfo, instrumentData, sampleOffsetSpeedGain, lastSampleOffset] = attackingNoteData;
                                     const attackedOffset = noteInfo.offset;
                                     const noteID = noteInfo.noteID;
                                     const position = offset - attackedOffset;
