@@ -645,7 +645,7 @@ export namespace Synthesizer {
         const channelWaveDatas = new Map<number, [Array<number>, Array<number>]>();
 
         // channelID -> Array[NoteInfo, sample_offset_speed_gain, last_sample_offset]
-        const channelIDAttackingNoteMap = new Map<number, Array<[NoteInfo, number, number]>>();
+        const channelIDAttackingNoteMap = new Map<number, Array<[NoteInfo, InstrumentData, number, number]>>();
         // channelID -> [ChannelInfo, wave]
         const channelInfoMap = new Map<number, [ChannelInfo, InstrumentData]>();
 
@@ -683,7 +683,6 @@ export namespace Synthesizer {
                 let loopAdjustFlag = false;
                 const processPartialMakeWaveSegment2 = (startOffset: number, endOffset : number) => {
                     console.log("Synthesize Processing...", startOffset, "-", endOffset, "/", Math.ceil(maxOffset));
-                    // TODO : 本当はこのファイルにdocumentを使うべきでない
                     onProcessCallback(`Synthesize Processing...${startOffset} / ${Math.ceil(maxOffset)}`);
 
                     const waveDataBufferForReverb : [number, number] = [0, 0]; // R L
@@ -733,18 +732,20 @@ export namespace Synthesizer {
                             }
                             const noteEvents = offsetNotesMap.get(channelID)?.get(offset);
                             if (noteEvents) {
+                                const instrumentData = channelInfoMap.get(channelID)?.[1];
                                 noteEvents.forEach(noteEvent => {
-                                    channelIDAttackingNoteMap.get(channelID).push([noteEvent, 0, 0]);
+                                    channelIDAttackingNoteMap.get(channelID).push([noteEvent, instrumentData, 0, 0]);
                                 })
                             }
                             if (offset >= maxOffset && loopAdjusting) {
                                 const adjustOffset = loopStartOffset + (offset - Math.ceil(maxOffset))-1;
                                 const addingNoteEvents = offsetNotesMap.get(channelID)?.get(adjustOffset);
                                 if (addingNoteEvents) {
+                                    const instrumentData = channelInfoMap.get(channelID)?.[1];
                                     addingNoteEvents.forEach(noteEvent => {
                                         noteEvent.offset = offset;
                                         noteEvent.endOffset = offset + noteEvent.length;
-                                        channelIDAttackingNoteMap.get(channelID).push([noteEvent, 0, 0]);
+                                        channelIDAttackingNoteMap.get(channelID).push([noteEvent, instrumentData, 0, 0]);
                                     });
                                 }
                             }
@@ -764,14 +765,15 @@ export namespace Synthesizer {
                             if (attackingNotes.length >= 1) {
                                 const channelData = channelInfoMap.get(channelID);
                                 let channelInfo : ChannelInfo;
-                                let instrumentData : InstrumentData;
                                 if (channelData) {
-                                    [channelInfo, instrumentData] = channelInfoMap.get(channelID);
+                                    [channelInfo] = channelInfoMap.get(channelID);
                                 }
                                 attackingNotes.forEach((attackingNoteData, arrayIndex) => {
+                                    let instrumentData : InstrumentData;
                                     if (!channelData) return;
                                     if (!attackingNoteData) return;
-                                    const [noteInfo, sampleOffsetSpeedGain, lastSampleOffset] = attackingNoteData;
+                                    const [noteInfo, attackingInstrumentData, sampleOffsetSpeedGain, lastSampleOffset] = attackingNoteData;
+                                    instrumentData = attackingInstrumentData;
                                     const attackedOffset = noteInfo.offset;
                                     const noteID = noteInfo.noteID;
                                     const position = offset - attackedOffset;
@@ -919,7 +921,7 @@ export namespace Synthesizer {
                                         // サンプル側の取得するべきオフセットを取得(ピッチによる変動を考慮済み)
                                         let sampleOffset = Math.max(0, (lastSampleOffset + sampleOffsetDefaultSpeed * freqRate * nextSampleOffsetSpeedGain));
                                         // speedとOffset更新
-                                        channelIDAttackingNoteMap.get(channelID)[arrayIndex] = [noteInfo, nextSampleOffsetSpeedGain, sampleOffset];
+                                        channelIDAttackingNoteMap.get(channelID)[arrayIndex] = [noteInfo, instrumentData, nextSampleOffsetSpeedGain, sampleOffset];
                                         
                                         // サンプルwaveのループ部分
                                         if (waveLooping && sampleOffset >= (waveLoopStart + waveLoopLength)) {
