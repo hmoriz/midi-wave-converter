@@ -900,7 +900,7 @@ export namespace Synthesizer {
                                                 lfoPitchCents = Math.sin(Math.max(0, sec - art1Info.LFODelay) * Math.PI * 2 * art1Info.LFOFrequency) * (art1Info.LFOToPitch + (art1Info.PitchPerModWheel || 50) * (channelInfo.modWheel / 127));
                                                 // if (channelInfo.modWheel > 0) console.log(channelID, offset, sec, art1Info.LFODelay, channelInfo.modWheel, lfo, art1Info.LFOToPitch, art1Info.PitchPerModWheel);
                                             }
-                                            eg2PitchCents += lfoPitchCents;
+                                            sampleOffsetSpeedCents += lfoPitchCents;
                                             if (wsmp) {
                                                 // sFineTune を加味 (NOTE : DLSの仕様では65536で割るべきっぽいけどgm.dlsのfineTuneの内容的に行わない)
                                                 sampleOffsetSpeedCents += wsmp.sFineTune;
