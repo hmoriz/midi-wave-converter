@@ -136,7 +136,7 @@ export class MIDIParser {
                 let subDelta = delta;
                 delta &= 0x7F;
                 while(subDelta >= 0x80) {
-                    subDelta = this._data.getUint8(subOffset + deltaSize)
+                    subDelta = this._data.getUint8(subOffset + deltaSize);
                     deltaSize++;
                     delta = (delta << 7) + (subDelta & 0x7F);
                 }
@@ -218,7 +218,7 @@ export class MIDIParser {
             const [mtrk, usingMtrk] = this._parseMtrkChunk(mtrkChunkOffset);
             ret.mtrks.push(mtrk);
             ret.usingXG = ret.usingXG || usingMtrk;
-            mtrkChunkOffset += mtrk.size + 8; 
+            mtrkChunkOffset += mtrk.size + 8;
         }
 
 

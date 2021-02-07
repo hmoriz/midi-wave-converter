@@ -49,7 +49,8 @@ export namespace Synthesizer {
         
         KeyNumberToPitch : number = -2147483648;
 
-        PitchPerModWheel : number = 0;
+        PitchPerModWheel  : number = 0;
+        VolumePerModWheel : number = 0;
     }
     
     const art1InfoCache = new Map<number, Art1Info>();
@@ -164,7 +165,12 @@ export namespace Synthesizer {
                     case DLS.ART1DESTINATION.CONN_DST_GAIN:
                         if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_LFO) {
                             // LFO -> Volume
-                            ret.LFOToVolume = cb.lScale / 655360;
+                            if (cb.usControl === DLS.ART1CONTROL.CONN_CTRL_NONE) {
+                                ret.LFOToVolume = cb.lScale / 655360;
+                            } else if (cb.usControl === DLS.ART1CONTROL.CONN_CTRL_CC1) {
+                                // (なさそう)
+                                ret.VolumePerModWheel = cb.lScale / 655360;
+                            }
                             return;
                         }
                         if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_CC7) {
@@ -196,7 +202,7 @@ export namespace Synthesizer {
                         }
                         if (cb.usSource === DLS.ART1SOURCE.CONN_SRC_EG2) {
                             // EG2 Value to Pitch (max pitch delta)
-                            ret.EG2ToPitch = Math.max(-1200, Math.min(1200, cb.lScale / 65536.0 / 10));
+                            ret.EG2ToPitch = Math.max(-1200, Math.min(1200, cb.lScale / 65536.0));
                             return;
                         }
                         break;
@@ -817,11 +823,7 @@ export namespace Synthesizer {
                                         let waveLooping = false;
                                         let freqRate = 1;
                                         if (wsmp) {
-                                            let unityNote = wsmp.usUnityNote;
-                                            if (channelInfo.instrumentID >= 113) {
-                                                // NOTE: どうもそうっぽいので
-                                                unityNote = 60;
-                                            }
+                                            const unityNote = wsmp.usUnityNote;
                                             baseFrequency = Util.getFrequencyFromNoteID(unityNote);
                                             const altFreq = Util.getFrequencyFromNoteID(noteID);
                                             freqRate = altFreq / baseFrequency;
@@ -892,13 +894,11 @@ export namespace Synthesizer {
                                             sampleOffsetSpeedCents += eg2PitchCents;
                                             // LFO情報もpositionDXに適用 (cent単位)
                                             let lfoPitchCents = 0;
-                                            if (art1Info.LFOToPitch !== 0 || art1Info.PitchPerModWheel !== 0) {
+                                            if ((channelInfo && channelInfo.modWheel > 0) || art1Info.LFOToPitch !== 0) {
                                                 // 遅延が存在する場合は遅延時間以降でサインカーブを生成
                                                 // また, -50～50(DLSに設定が存在する場合は別)centでmodulationWheelを適用
-                                                if (sec >= art1Info.LFODelay) {
-                                                    lfoPitchCents = Math.sin((sec - art1Info.LFODelay) * Math.PI * 2 * art1Info.LFOFrequency) * (art1Info.LFOToPitch + (art1Info.PitchPerModWheel || 50) * (channelInfo.modWheel / 128));
-                                                }
-                                                //if (channelInfo.modWheel > 0) console.log(channelID, offset, sec, art1Info.LFODelay, channelInfo.modWheel, lfo, art1Info.LFOToPitch, art1Info.PitchPerModWheel);
+                                                lfoPitchCents = Math.sin(Math.max(0, sec - art1Info.LFODelay) * Math.PI * 2 * art1Info.LFOFrequency) * (art1Info.LFOToPitch + (art1Info.PitchPerModWheel || 50) * (channelInfo.modWheel / 127));
+                                                // if (channelInfo.modWheel > 0) console.log(channelID, offset, sec, art1Info.LFODelay, channelInfo.modWheel, lfo, art1Info.LFOToPitch, art1Info.PitchPerModWheel);
                                             }
                                             eg2PitchCents += lfoPitchCents;
                                             if (wsmp) {
@@ -906,7 +906,6 @@ export namespace Synthesizer {
                                                 sampleOffsetSpeedCents += wsmp.sFineTune;
                                             }
                                             // ピッチベンド Cent値適用 (-8192～8191の範囲で存在し, 最大6分の1オクターブ程度変更させる)
-                                            // TODO : RPN
                                             let pitchBendCents = 0;
                                             if (pitchBendMap.has(channelID)) {
                                                 const pitchBend = pitchBendMap.get(channelID);
@@ -1000,10 +999,10 @@ export namespace Synthesizer {
                                         let lfo = 0;
                                         let lfoAttenuation = 0;
                                         if (art1Info) {
-                                            if (art1Info.LFOToVolume > 0) {
+                                            if (art1Info.LFOToVolume != 0) {
                                                 // 遅延が存在する場合は遅延時間以降でサインカーブを生成
                                                 if (sec >= art1Info.LFODelay) {
-                                                    lfo = Math.sin((sec - art1Info.LFODelay) * Math.PI * 2 * art1Info.LFOFrequency) * art1Info.LFOToVolume;
+                                                    lfo = Math.sin(Math.max(0, sec - art1Info.LFODelay) * Math.PI * 2 * art1Info.LFOFrequency) * art1Info.LFOToVolume;
                                                     lfoAttenuation = lfo;
                                                 }
                                             }

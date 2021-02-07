@@ -141,7 +141,7 @@ export namespace Sample {
                                             if (sec < attackTime) {
                                                 // Attack Zone
                                                 if (sec === 0) {
-                                                    sampleOffsetSpeedCents = 0
+                                                    sampleOffsetSpeedCents = 0;
                                                 } else {
                                                     sampleOffsetSpeedCents = art1Info.EG2ToPitch * sec / attackTime;
                                                 }
@@ -308,7 +308,7 @@ export namespace Sample {
                                                 lfo = Math.sin((sec - art1Info.LFODelay) * Math.PI * 2 / art1Info.LFOFrequency) * art1Info.LFOToVolume;
                                                 lfoAttenuation = lfo;
                                             }
-                                        } 
+                                        }
                                     }
                                     // WSMPのAttenuationを加味
                                     let wsmpAttenuation = 0;
