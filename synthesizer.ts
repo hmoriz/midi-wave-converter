@@ -425,7 +425,6 @@ export namespace Synthesizer {
                                 // LSB
                                 channelInfo.bankID = (channelInfo.bankID & 0x00FF) + (mtrkEvent.event.value1 << 8);
                             }
-                            console.log("bank", mtrkEvent.event.channel, mtrkEvent.event.value1, mtrkEvent.event.controlCommand === 0x00, channelInfo.bankID);
                         } else if (mtrkEvent.event.controlCommand === 1) {
                             // Modulation wheel
                             channelInfo.modWheel = mtrkEvent.event.value1;
@@ -718,7 +717,7 @@ export namespace Synthesizer {
                                 const adjustOffset = loopStartOffset + (offset - Math.ceil(maxOffset))-1;
                                 channelEvent = offsetChannelInfoMap.get(channelID)?.get(adjustOffset);
                             }
-                            const noteEvents = offsetNotesMap.get(channelID)?.get(offset);
+                            const noteEvents = offsetNotesMap.get(channelID)?.get(offset) || new Array<NoteInfo>();
                             if (offset >= maxOffset && loopAdjusting) {
                                 const adjustOffset = loopStartOffset + (offset - Math.ceil(maxOffset))-1;
                                 const addingNoteEvents = offsetNotesMap.get(channelID)?.get(adjustOffset);
@@ -727,12 +726,12 @@ export namespace Synthesizer {
                                         noteEvent.offset = offset;
                                         noteEvent.endOffset = offset + noteEvent.length;
                                     });
-                                    noteEvents.push.apply(null, addingNoteEvents);
+                                    noteEvents.push(...addingNoteEvents);
                                 }
                             }
                         
                             if (channelEvent) {
-                                if (noteEvents) {
+                                if (noteEvents && noteEvents.length >= 1) {
                                     // 全く同タイミングでノート開始とチャンネル情報変更がはいっている場合、 ノート開始を先に実行させて次のオフセットでチャンネルを変更させる
                                     // とある楽曲で無効な楽器が参照されるのを回避するための応急処置
                                     offsetChannelInfoMap.get(channelID).set(offset+1, channelEvent);  
@@ -764,7 +763,7 @@ export namespace Synthesizer {
                                     }
                                 }
                             }
-                            if (noteEvents) {
+                            if (noteEvents && noteEvents.length >= 1) {
                                 const instrumentData = channelInfoMap.get(channelID)?.[1];
                                 noteEvents.forEach(noteEvent => {
                                     channelIDAttackingNoteMap.get(channelID).push([noteEvent, instrumentData, 0, 0]);
