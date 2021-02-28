@@ -418,13 +418,14 @@ export namespace Synthesizer {
                         }
                         if (mtrkEvent.event.controlCommand === 0x00 || mtrkEvent.event.controlCommand === 0x20) {
                             // BANK Select (0x00 -> LSB, 0x20 -> MSB)
-                            if (mtrkEvent.event.controlCommand === 0x00) {
-                                // LSB
-                                channelInfo.bankID = channelInfo.bankID & 0xFF00 + mtrkEvent.event.value1;
-                            } else {
+                            if (mtrkEvent.event.controlCommand === 0x20) {
                                 // MSB
-                                channelInfo.bankID = channelInfo.bankID & 0x00FF + (mtrkEvent.event.value1 << 8);
+                                channelInfo.bankID = (channelInfo.bankID & 0xFF00) + mtrkEvent.event.value1;
+                            } else {
+                                // LSB
+                                channelInfo.bankID = (channelInfo.bankID & 0x00FF) + (mtrkEvent.event.value1 << 8);
                             }
+                            console.log("bank", mtrkEvent.event.channel, mtrkEvent.event.value1, mtrkEvent.event.controlCommand === 0x00, channelInfo.bankID);
                         } else if (mtrkEvent.event.controlCommand === 1) {
                             // Modulation wheel
                             channelInfo.modWheel = mtrkEvent.event.value1;
@@ -680,7 +681,6 @@ export namespace Synthesizer {
 
         const processPartialMakeWaveSegment = (startOffset : number, endOffset : number) : Promise<void> => {
             return new Promise<void>((done) => {
-                let loopAdjustFlag = false;
                 const processPartialMakeWaveSegment2 = (startOffset: number, endOffset : number) => {
                     console.log("Synthesize Processing...", startOffset, "-", endOffset, "/", Math.ceil(maxOffset));
                     onProcessCallback(`Synthesize Processing...${startOffset} / ${Math.ceil(maxOffset)}`);
@@ -718,37 +718,59 @@ export namespace Synthesizer {
                                 const adjustOffset = loopStartOffset + (offset - Math.ceil(maxOffset))-1;
                                 channelEvent = offsetChannelInfoMap.get(channelID)?.get(adjustOffset);
                             }
-                            if (channelEvent) {
-                                /** @ts-ignore  */
-                                const instrumentData = dls.instrumentIDMap.get(channelEvent.instrumentID)?.get(channelID === 9 ? 2147483648 : channelEvent.bankID);
-                                channelInfoMap.set(channelID, [channelEvent, instrumentData]);
-                                if (offset < Math.ceil(maxOffset)-1 && channelEvent.loopStartTick >= 0) {
-                                    tempLoopStart = Math.round(tickToOffset.get(channelEvent.loopStartTick));
-                                    console.log(channelID, channelEvent.loopStartTick, tempLoopStart);
-                                }
-                                if (offset < Math.ceil(maxOffset)-1 && channelEvent.loopLengthTick >= 0) {
-                                    tempLoopLength = Math.round(tickToOffset.get(channelEvent.loopLengthTick));
+                            const noteEvents = offsetNotesMap.get(channelID)?.get(offset);
+                            if (offset >= maxOffset && loopAdjusting) {
+                                const adjustOffset = loopStartOffset + (offset - Math.ceil(maxOffset))-1;
+                                const addingNoteEvents = offsetNotesMap.get(channelID)?.get(adjustOffset);
+                                if (addingNoteEvents) {
+                                    addingNoteEvents.forEach(noteEvent => {
+                                        noteEvent.offset = offset;
+                                        noteEvent.endOffset = offset + noteEvent.length;
+                                    });
+                                    noteEvents.push.apply(null, addingNoteEvents);
                                 }
                             }
-                            const noteEvents = offsetNotesMap.get(channelID)?.get(offset);
+                        
+                            if (channelEvent) {
+                                if (noteEvents) {
+                                    // 全く同タイミングでノート開始とチャンネル情報変更がはいっている場合、 ノート開始を先に実行させて次のオフセットでチャンネルを変更させる
+                                    // とある楽曲で無効な楽器が参照されるのを回避するための応急処置
+                                    offsetChannelInfoMap.get(channelID).set(offset+1, channelEvent);  
+                                } else {
+                                    /** @ts-ignore  */
+                                    const bankID = channelID === 9 ? 2147483648 : channelEvent.bankID;
+                                    let instrumentData : InstrumentData;
+                                    if (dls.instrumentIDMap.get(channelEvent.instrumentID).has(bankID)) {
+                                        instrumentData = dls.instrumentIDMap.get(channelEvent.instrumentID)?.get(bankID);
+                                    } else {
+                                        // bankIDの音が不在なので0で代用する
+                                        // TODO : GS, XG音源対策
+                                        /** @ts-ignore  */
+                                        if (channelID !== 9) {
+                                            instrumentData = dls.instrumentIDMap.get(channelEvent.instrumentID)?.get(0);
+                                            console.warn(`channel ${channelID}: instrument ${channelEvent.instrumentID}'s bank ${bankID} is not found, using 0`);
+                                        } else {
+                                            instrumentData = dls.instrumentIDMap.get(0)?.get(2147483648);
+                                            console.warn(`channel ${channelID}: Rhythm instrument ${channelEvent.instrumentID} is not found, using 0`, instrumentData);
+                                        }
+                                    }
+                                    channelInfoMap.set(channelID, [channelEvent, instrumentData]);
+                                    if (offset < Math.ceil(maxOffset)-1 && channelEvent.loopStartTick >= 0) {
+                                        tempLoopStart = Math.round(tickToOffset.get(channelEvent.loopStartTick));
+                                        console.log(channelID, channelEvent.loopStartTick, tempLoopStart);
+                                    }
+                                    if (offset < Math.ceil(maxOffset)-1 && channelEvent.loopLengthTick >= 0) {
+                                        tempLoopLength = Math.round(tickToOffset.get(channelEvent.loopLengthTick));
+                                    }
+                                }
+                            }
                             if (noteEvents) {
                                 const instrumentData = channelInfoMap.get(channelID)?.[1];
                                 noteEvents.forEach(noteEvent => {
                                     channelIDAttackingNoteMap.get(channelID).push([noteEvent, instrumentData, 0, 0]);
                                 })
                             }
-                            if (offset >= maxOffset && loopAdjusting) {
-                                const adjustOffset = loopStartOffset + (offset - Math.ceil(maxOffset))-1;
-                                const addingNoteEvents = offsetNotesMap.get(channelID)?.get(adjustOffset);
-                                if (addingNoteEvents) {
-                                    const instrumentData = channelInfoMap.get(channelID)?.[1];
-                                    addingNoteEvents.forEach(noteEvent => {
-                                        noteEvent.offset = offset;
-                                        noteEvent.endOffset = offset + noteEvent.length;
-                                        channelIDAttackingNoteMap.get(channelID).push([noteEvent, instrumentData, 0, 0]);
-                                    });
-                                }
-                            }
+
                             let pitchBendEventMap = offsetPitchBendMap.get(channelID);
                             if (pitchBendEventMap && pitchBendEventMap.has(offset)) {
                                 const pitchBendEvent =  pitchBendEventMap.get(offset);

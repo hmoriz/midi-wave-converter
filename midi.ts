@@ -122,7 +122,8 @@ export class MIDIParser {
         const chunkKey = this._getString(offset, 4);
         const chunkSize = this._data.getUint32(offset + 4, false);
         if (chunkKey !== 'MTrk') {
-            throw new Error('File does NOT have MTrk Header : ' + chunkKey);
+            console.error(offset.toString() + ': File does NOT have MTrk Header : ' + chunkKey);
+            return;
         }
         const mtrk = new MIDI.MTrkChunk(offset, chunkSize);
         let usingXG = false;
@@ -215,10 +216,14 @@ export class MIDIParser {
 
         let mtrkChunkOffset = 14;
         while (mtrkChunkOffset < arrayBuffer.byteLength) {
-            const [mtrk, usingMtrk] = this._parseMtrkChunk(mtrkChunkOffset);
-            ret.mtrks.push(mtrk);
-            ret.usingXG = ret.usingXG || usingMtrk;
-            mtrkChunkOffset += mtrk.size + 8;
+            const result = this._parseMtrkChunk(mtrkChunkOffset);
+            if (result) {
+                const [mtrk, usingMtrk] = result;
+                ret.mtrks.push(mtrk);
+                ret.usingXG = ret.usingXG || usingMtrk;
+                mtrkChunkOffset += mtrk.size;
+            }
+            mtrkChunkOffset += 8;
         }
 
 
