@@ -350,6 +350,8 @@ export namespace Synthesizer {
         const tickTempoMap = new Map<number, number>();
         // channel ID -> tick -> Instrument Info
         const tickInstrumentMap = new Map<number, Map<number, ChannelInfo>>();
+        // channelID -> tick -> CC Event
+        const tickCCEventMap = new Map<number, Map<number, MIDI.MIDIEvent>>();
         // channel ID -> tick
         const channelToInstrumentLastTick = new Map<number, number>();
         // channel ID -> tick -> [Note info]
@@ -408,130 +410,10 @@ export namespace Synthesizer {
                             }
                         }
                     } else if (mtrkEvent.event.isControlEvent) {
-                        const lastTick = channelToInstrumentLastTick.get(mtrkEvent.event.channel);
-                        let channelInfo : ChannelInfo
-                        if (channelToInstrumentLastTick.has(mtrkEvent.event.channel)) {
-                            let lastInstrument = tickInstrumentMap.get(mtrkEvent.event.channel).get(lastTick);
-                            channelInfo = new ChannelInfo(lastInstrument);
-                        } else {
-                            channelInfo = new ChannelInfo();
+                        if (!tickCCEventMap.has(mtrkEvent.event.channel)) {
+                            tickCCEventMap.set(mtrkEvent.event.channel, new Map<number, MIDI.MIDIEvent>());
                         }
-                        if (mtrkEvent.event.controlCommand === 0x00 || mtrkEvent.event.controlCommand === 0x20) {
-                            // BANK Select (0x00 -> LSB, 0x20 -> MSB)
-                            if (mtrkEvent.event.controlCommand === 0x20) {
-                                // MSB
-                                channelInfo.bankID = (channelInfo.bankID & 0xFF00) + mtrkEvent.event.value1;
-                            } else {
-                                // LSB
-                                channelInfo.bankID = (channelInfo.bankID & 0x00FF) + (mtrkEvent.event.value1 << 8);
-                            }
-                        } else if (mtrkEvent.event.controlCommand === 1) {
-                            // Modulation wheel
-                            channelInfo.modWheel = mtrkEvent.event.value1;
-                        } else if (mtrkEvent.event.controlCommand === 7) {
-                            // Volume
-                            channelInfo.volume = mtrkEvent.event.value1;
-                        } else if (mtrkEvent.event.controlCommand === 10) {
-                            // PAN
-                            channelInfo.pan = mtrkEvent.event.value1;
-                        } else if (mtrkEvent.event.controlCommand === 11) {
-                            // Expression
-                            channelInfo.expression = mtrkEvent.event.value1;
-                        } else if (mtrkEvent.event.controlCommand === 6) {
-                            // RPN Data Entry
-                            if (channelInfo.usingNrpn) {
-                                // NRPN
-                                console.warn("not implemented NRPN", mtrkEvent.event.channel, channelInfo.nRPNMSB.toString(16), channelInfo.nRPNLSB.toString(16), mtrkEvent.event.value1);
-                            } else {
-                                // RPN
-                                if (channelInfo.rpnMSB === 0 && channelInfo.rpnLSB === 0 ) {
-                                    // Pitchbend Sensitivity
-                                    channelInfo.pitchBendSensitivity = mtrkEvent.event.value1;
-                                } else {
-                                    console.warn("not inplemented RPN", mtrkEvent.event.channel, channelInfo.rpnMSB.toString(16), channelInfo.rpnLSB.toString(16));
-                                }
-                            }
-                        } else if (mtrkEvent.event.controlCommand === 71) {
-                            // filter resonance
-                            if (mtrkEvent.event.value1 !== 64) {
-                                console.warn("not implemented about filter!", mtrkEvent.event.value1);
-                            }
-                        } else if (mtrkEvent.event.controlCommand === 72) {
-                            // Release Time
-                            if (mtrkEvent.event.value1 !== 64) {
-                                console.warn("not implemented about time cent!", mtrkEvent.event.value1);
-                            }
-                        } else if (mtrkEvent.event.controlCommand === 73) {
-                            // Attack Time
-                            if (mtrkEvent.event.value1 !== 64) {
-                                console.warn("not implemented about filter!", mtrkEvent.event.value1);
-                            }
-                        } else if (mtrkEvent.event.controlCommand === 75) {
-                            // Release Time
-                            if (mtrkEvent.event.value1 !== 64) {
-                                console.warn("not implemented about time cent!", mtrkEvent.event.value1);
-                            }
-                        } else if (mtrkEvent.event.controlCommand === 74) {
-                            // Brightness
-                            if (mtrkEvent.event.value1 !== 64) {
-                                console.warn("not implemented about time cent!", mtrkEvent.event.value1);
-                            }
-                        } else if (mtrkEvent.event.controlCommand === 91) {
-                            // Reverb (実装済み)
-                            if (mtrkEvent.event.value1 !== 0) {
-                                channelInfo.reverbLevel = mtrkEvent.event.value1;
-                            }
-                        } else if (mtrkEvent.event.controlCommand === 93) {
-                            // Chorus (実装済み)
-                            if (mtrkEvent.event.value1 !== 0) {
-                                channelInfo.chorusLevel = mtrkEvent.event.value1;
-                            }
-                        } else if (mtrkEvent.event.controlCommand === 94) {
-                            // Delay(GS) / Variety(XG)
-                            if (midi.usingXG) {
-                                if (mtrkEvent.event.value1 !== 0) {
-                                    console.warn("not implemented Variable Effect", mtrkEvent.event.value1)
-                                }
-                            } else {
-                                if (mtrkEvent.event.value1 !== 0) {
-                                    console.warn("not implemented Delay", mtrkEvent.event.value1)
-                                }
-
-                            }
-                        } else if (mtrkEvent.event.controlCommand === 98) {
-                            // NRPN LSB
-                            if (!midi.usingXG) {
-                                console.error("This MIDI is not using XG!");
-                            }
-                            channelInfo.nRPNLSB = mtrkEvent.event.value1;
-                            channelInfo.usingNrpn = true;
-                        } else if (mtrkEvent.event.controlCommand === 99) {
-                            // NRPN MSB
-                            if (!midi.usingXG) {
-                                console.error("This MIDI is not using XG!");
-                            }
-                            channelInfo.nRPNMSB = mtrkEvent.event.value1;
-                            channelInfo.usingNrpn = true;
-                        } else if (mtrkEvent.event.controlCommand === 100) {
-                            // RPN LSB
-                            channelInfo.rpnLSB = mtrkEvent.event.value1;
-                            channelInfo.usingNrpn = false;
-                        } else if (mtrkEvent.event.controlCommand === 101) {
-                            // RPN MSB
-                            channelInfo.rpnMSB = mtrkEvent.event.value1;
-                            channelInfo.usingNrpn = false;
-                        } else if (mtrkEvent.event.controlCommand === 111) {
-                            if (channelInfo.loopStartTick <= 0) {
-                                channelInfo.loopStartTick = tick;
-                            } else {
-                                channelInfo.loopLengthTick = tick - channelInfo.loopStartTick;
-                            }
-                        } else {
-                            console.warn("not implemented Control Command", mtrkEvent.event.channel, mtrkEvent.event.controlCommand, mtrkEvent.event);
-                        }
-                        if (!tickInstrumentMap.get(mtrkEvent.event.channel)) tickInstrumentMap.set(mtrkEvent.event.channel, new Map());
-                        tickInstrumentMap.get(mtrkEvent.event.channel).set(tick, channelInfo);
-                        channelToInstrumentLastTick.set(mtrkEvent.event.channel, tick);
+                        tickCCEventMap.get(mtrkEvent.event.channel).set(tick, mtrkEvent.event);
                     } else if (mtrkEvent.event.isProgramChangeEvent) {
                         // Program ID
                         const lastTick = channelToInstrumentLastTick.get(mtrkEvent.event.channel);
@@ -561,6 +443,136 @@ export namespace Synthesizer {
                 }
             });
             maxTick = Math.max(maxTick, tick);
+        });
+
+        tickCCEventMap.forEach((tickEventMap) => {
+            Object.keys(tickEventMap).map(a => Number(a)).sort().forEach((tick) => {
+                const mtrkEvent = tickEventMap.get(tick);
+                const lastTick = channelToInstrumentLastTick.get(mtrkEvent.channel);
+                let channelInfo : ChannelInfo;
+                if (channelToInstrumentLastTick.has(mtrkEvent.channel)) {
+                    let lastInstrument = tickInstrumentMap.get(mtrkEvent.channel).get(lastTick);
+                    channelInfo = new ChannelInfo(lastInstrument);
+                } else {
+                    channelInfo = new ChannelInfo();
+                }
+                if (mtrkEvent.controlCommand === 0x00 || mtrkEvent.controlCommand === 0x20) {
+                    // BANK Select (0x00 -> LSB, 0x20 -> MSB)
+                    if (mtrkEvent.controlCommand === 0x20) {
+                        // MSB
+                        channelInfo.bankID = (channelInfo.bankID & 0xFF00) + mtrkEvent.value1;
+                    } else {
+                        // LSB
+                        channelInfo.bankID = (channelInfo.bankID & 0x00FF) + (mtrkEvent.value1 << 8);
+                    }
+                } else if (mtrkEvent.controlCommand === 1) {
+                    // Modulation wheel
+                    channelInfo.modWheel = mtrkEvent.value1;
+                } else if (mtrkEvent.controlCommand === 7) {
+                    // Volume
+                    channelInfo.volume = mtrkEvent.value1;
+                } else if (mtrkEvent.controlCommand === 10) {
+                    // PAN
+                    channelInfo.pan = mtrkEvent.value1;
+                } else if (mtrkEvent.controlCommand === 11) {
+                    // Expression
+                    channelInfo.expression = mtrkEvent.value1;
+                } else if (mtrkEvent.controlCommand === 6) {
+                    // RPN Data Entry
+                    if (channelInfo.usingNrpn) {
+                        // NRPN
+                        console.warn("not implemented NRPN", mtrkEvent.channel, channelInfo.nRPNMSB.toString(16), channelInfo.nRPNLSB.toString(16), mtrkEvent.value1);
+                    } else {
+                        // RPN
+                        if (channelInfo.rpnMSB === 0 && channelInfo.rpnLSB === 0 ) {
+                            // Pitchbend Sensitivity
+                            channelInfo.pitchBendSensitivity = mtrkEvent.value1;
+                        } else {
+                            console.warn("not inplemented RPN", mtrkEvent.channel, channelInfo.rpnMSB.toString(16), channelInfo.rpnLSB.toString(16));
+                        }
+                    }
+                } else if (mtrkEvent.controlCommand === 71) {
+                    // filter resonance
+                    if (mtrkEvent.value1 !== 64) {
+                        console.warn("not implemented about filter!", mtrkEvent.value1);
+                    }
+                } else if (mtrkEvent.controlCommand === 72) {
+                    // Release Time
+                    if (mtrkEvent.value1 !== 64) {
+                        console.warn("not implemented about time cent!", mtrkEvent.value1);
+                    }
+                } else if (mtrkEvent.controlCommand === 73) {
+                    // Attack Time
+                    if (mtrkEvent.value1 !== 64) {
+                        console.warn("not implemented about filter!", mtrkEvent.value1);
+                    }
+                } else if (mtrkEvent.controlCommand === 75) {
+                    // Release Time
+                    if (mtrkEvent.value1 !== 64) {
+                        console.warn("not implemented about time cent!", mtrkEvent.value1);
+                    }
+                } else if (mtrkEvent.controlCommand === 74) {
+                    // Brightness
+                    if (mtrkEvent.value1 !== 64) {
+                        console.warn("not implemented about time cent!", mtrkEvent.value1);
+                    }
+                } else if (mtrkEvent.controlCommand === 91) {
+                    // Reverb (実装済み)
+                    if (mtrkEvent.value1 !== 0) {
+                        channelInfo.reverbLevel = mtrkEvent.value1;
+                    }
+                } else if (mtrkEvent.controlCommand === 93) {
+                    // Chorus (実装済み)
+                    if (mtrkEvent.value1 !== 0) {
+                        channelInfo.chorusLevel = mtrkEvent.value1;
+                    }
+                } else if (mtrkEvent.controlCommand === 94) {
+                    // Delay(GS) / Variety(XG)
+                    if (midi.usingXG) {
+                        if (mtrkEvent.value1 !== 0) {
+                            console.warn("not implemented Variable Effect", mtrkEvent.value1)
+                        }
+                    } else {
+                        if (mtrkEvent.value1 !== 0) {
+                            console.warn("not implemented Delay", mtrkEvent.value1)
+                        }
+
+                    }
+                } else if (mtrkEvent.controlCommand === 98) {
+                    // NRPN LSB
+                    if (!midi.usingXG) {
+                        console.error("This MIDI is not using XG!");
+                    }
+                    channelInfo.nRPNLSB = mtrkEvent.value1;
+                    channelInfo.usingNrpn = true;
+                } else if (mtrkEvent.controlCommand === 99) {
+                    // NRPN MSB
+                    if (!midi.usingXG) {
+                        console.error("This MIDI is not using XG!");
+                    }
+                    channelInfo.nRPNMSB = mtrkEvent.value1;
+                    channelInfo.usingNrpn = true;
+                } else if (mtrkEvent.controlCommand === 100) {
+                    // RPN LSB
+                    channelInfo.rpnLSB = mtrkEvent.value1;
+                    channelInfo.usingNrpn = false;
+                } else if (mtrkEvent.controlCommand === 101) {
+                    // RPN MSB
+                    channelInfo.rpnMSB = mtrkEvent.value1;
+                    channelInfo.usingNrpn = false;
+                } else if (mtrkEvent.controlCommand === 111) {
+                    if (channelInfo.loopStartTick <= 0) {
+                        channelInfo.loopStartTick = tick;
+                    } else {
+                        channelInfo.loopLengthTick = tick - channelInfo.loopStartTick;
+                    }
+                } else {
+                    console.warn("not implemented Control Command", mtrkEvent.channel, mtrkEvent.controlCommand, mtrkEvent);
+                }
+                if (!tickInstrumentMap.get(mtrkEvent.channel)) tickInstrumentMap.set(mtrkEvent.channel, new Map());
+                tickInstrumentMap.get(mtrkEvent.channel).set(tick, channelInfo);
+                channelToInstrumentLastTick.set(mtrkEvent.channel, tick);
+            });
         });
 
         const channelIDs = new Set<number>();
@@ -734,7 +746,7 @@ export namespace Synthesizer {
                                 if (noteEvents && noteEvents.length >= 1) {
                                     // 全く同タイミングでノート開始とチャンネル情報変更がはいっている場合、 ノート開始を先に実行させて次のオフセットでチャンネルを変更させる
                                     // とある楽曲で無効な楽器が参照されるのを回避するための応急処置
-                                    offsetChannelInfoMap.get(channelID).set(offset+1, channelEvent);  
+                                    offsetChannelInfoMap.get(channelID).set(offset+1, channelEvent);
                                 } else {
                                     /** @ts-ignore  */
                                     const bankID = channelID === 9 ? 2147483648 : channelEvent.bankID;
