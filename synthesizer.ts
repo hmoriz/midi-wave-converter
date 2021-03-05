@@ -589,8 +589,6 @@ export namespace Synthesizer {
             });
         });
 
-        console.log(tickInstrumentMap, tickCCEventMap, tickPitchBendMap);
-
         const channelIDs = new Set<number>();
         tickInstrumentMap.forEach((_, channelID) => channelIDs.add(channelID));
         tickNotesMap.forEach((_, channelID) => channelIDs.add(channelID));
@@ -784,7 +782,7 @@ export namespace Synthesizer {
                                     channelInfoMap.set(channelID, [channelEvent, instrumentData]);
                                     if (offset < Math.ceil(maxOffset)-1 && channelEvent.loopStartTick >= 0) {
                                         tempLoopStart = Math.round(tickToOffset.get(channelEvent.loopStartTick));
-                                        console.log(channelID, channelEvent.loopStartTick, tempLoopStart);
+                                        // console.log(channelID, channelEvent.loopStartTick, tempLoopStart);
                                     }
                                     if (offset < Math.ceil(maxOffset)-1 && channelEvent.loopLengthTick >= 0) {
                                         tempLoopLength = Math.round(tickToOffset.get(channelEvent.loopLengthTick));
@@ -893,9 +891,10 @@ export namespace Synthesizer {
                                                 const noteSeconds = sec - secFromReleased;
                                                 let attackRate = 1.0;
                                                 if (attackTime > noteSeconds) {
-                                                    attackTime = noteSeconds;
                                                     attackRate = attackTime === 0 ? 1.0 : 1 / (noteSeconds / attackTime);
+                                                    attackTime = noteSeconds;
                                                 }
+                                                if (offset % 100000 === 0) console.log(attackTime, decayTime, noteSeconds, attackRate);
                                                 if (sec < attackTime) {
                                                     // Attack Zone
                                                     if (sec === 0) {
@@ -911,12 +910,13 @@ export namespace Synthesizer {
                                                         if (sec <= attackTime) {
                                                             eg2PitchCents = art1Info.EG2ToPitch;
                                                         } else {
-                                                            eg2PitchCents = art1Info.EG2ToPitch * (1 - Math.min(1, (sec - Math.min(attackTime, noteSeconds)) / decayTime));
+                                                            eg2PitchCents = art1Info.EG2ToPitch - art1Info.EG2ToPitch * Math.max(0, Math.min(1, (sec - Math.min(attackTime, noteSeconds))) / decayTime);
+                                                            if (offset % 100000 === 0) console.log(art1Info.EG2ToPitch, eg2PitchCents, sec, sec - Math.min(attackTime, noteSeconds));
                                                         }
                                                     }
                                                     eg2PitchCents = art1Info.EG2ToPitch > 0 ? 
-                                                        Math.max(eg2PitchCents, art1Info.EG2ToPitch * art1Info.EG2SustainLevel / 100.0) : 
-                                                        Math.min(eg2PitchCents, art1Info.EG2ToPitch * art1Info.EG2SustainLevel / 100.0);
+                                                        Math.min(0, Math.max(eg2PitchCents, art1Info.EG2ToPitch * art1Info.EG2SustainLevel / 100.0)) : 
+                                                        Math.max(0, Math.min(eg2PitchCents, art1Info.EG2ToPitch * art1Info.EG2SustainLevel / 100.0));
                                                 } else {
                                                     // Sustain or Release Zone
                                                     let dddx = art1Info.EG2ToPitch;
@@ -924,12 +924,12 @@ export namespace Synthesizer {
                                                         dddx = 0;
                                                     } else {
                                                         if (sec <= attackTime) {
-                                                            dddx = art1Info.EG2ToPitch * (1 - Math.min(1, (sec - Math.min(attackTime, noteSeconds)) / decayTime));
+                                                            dddx = art1Info.EG2ToPitch - art1Info.EG2ToPitch * Math.max(0, Math.min(1, (sec - Math.min(attackTime, noteSeconds))) / decayTime);
                                                         }
                                                     }
                                                     dddx = art1Info.EG2ToPitch > 0 ? 
-                                                        Math.max(dddx, art1Info.EG2ToPitch * art1Info.EG2SustainLevel / 100.0) :
-                                                        Math.min(dddx, art1Info.EG2ToPitch * art1Info.EG2SustainLevel / 100.0);
+                                                        Math.min(0, Math.max(dddx, art1Info.EG2ToPitch * art1Info.EG2SustainLevel / 100.0)) :
+                                                        Math.max(0, Math.min(dddx, art1Info.EG2ToPitch * art1Info.EG2SustainLevel / 100.0));
                                                     if (art1Info.EG2ReleaseTime === 0) {
                                                         eg2PitchCents = 0;
                                                     } else {
@@ -1007,8 +1007,8 @@ export namespace Synthesizer {
                                             const noteSeconds = sec - secFromReleased;
                                             let attackRate = 1.0;
                                             if (attackTime > noteSeconds) {
-                                                attackTime = noteSeconds;
                                                 attackRate = attackTime === 0 ? 1.0 : 1 / (noteSeconds / attackTime);
+                                                attackTime = noteSeconds;
                                             }
 
                                             if (sec < attackTime && positionFromReleased <= 0) {
@@ -1162,7 +1162,7 @@ export namespace Synthesizer {
                             }
                         }
                         if (loopAdjusting && tempLoopStart >= 0 && Math.abs(offset-loopStartOffset) <= 1) {
-                            console.log(tempLoopStart, offset, loopStartOffset, Math.abs(offset-loopStartOffset));
+                            // console.log(tempLoopStart, offset, loopStartOffset, Math.abs(offset-loopStartOffset));
                             channelIDs.forEach((channelID) => {
                                 // 現在再生中のNoteを記録し、 その音が消えるまでループ位置ををずらす
                                 channelIDAttackingNoteMap.get(channelID).forEach(attackingNoteData => {
@@ -1174,7 +1174,7 @@ export namespace Synthesizer {
                                     offsetChannelInfoMap.get(channelID).set(Math.ceil(maxOffset)-1, currentChannelInfos[0]);
                                 }
                             });
-                            console.log("adjusting loop", offset, loopStartOffset, loopAnnoyingNoteMap);
+                            // console.log("adjusting loop", offset, loopStartOffset, loopAnnoyingNoteMap);
                         }
                         // ループ修正処理中・終了処理
                         if (loopAdjusting && loopStartOffset >= 0 && loopStartOffset <= offset && loopAdjustOffset === loopStartOffset) {
@@ -1187,7 +1187,7 @@ export namespace Synthesizer {
                             });
                             if (num === 0) {
                                 loopAdjustOffset = offset;
-                                console.log('adjusted offset', offset, loopStartOffset);
+                                // console.log('adjusted offset', offset, loopStartOffset);
                             }
                         }
                         // ループ長さ獲得
