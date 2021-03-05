@@ -186,11 +186,9 @@ export async function loadMIDIFile(e : Event, dlsParseResult : DLSParseResult, w
 function main() {
     let dlsResult : DLSParseResult;
     const div1 = document.createElement('div');
-    div1.innerText = '1. select "gm.dls"    ';
+    div1.innerText = '1. select dls file(including gm.dls)    ';
     const input = document.createElement('input');
     input.type = 'file';
-    input.placeholder = 'gm.dls';
-    input.accept = 'dls';
     input.addEventListener('change', async (e) => {dlsResult = await loadDLSFile(e);});
     div1.appendChild(input);
     document.getElementById('inputarea').appendChild(div1);

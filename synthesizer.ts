@@ -351,7 +351,7 @@ export namespace Synthesizer {
         // channel ID -> tick -> Instrument Info
         const tickInstrumentMap = new Map<number, Map<number, ChannelInfo>>();
         // channelID -> tick -> CC Event
-        const tickCCEventMap = new Map<number, Map<number, MIDI.MIDIEvent>>();
+        const tickCCEventMap = new Map<number, Map<number, Array<MIDI.MIDIEvent>>>();
         // channel ID -> tick
         const channelToInstrumentLastTick = new Map<number, number>();
         // channel ID -> tick -> [Note info]
@@ -411,9 +411,12 @@ export namespace Synthesizer {
                         }
                     } else if (mtrkEvent.event.isControlEvent) {
                         if (!tickCCEventMap.has(mtrkEvent.event.channel)) {
-                            tickCCEventMap.set(mtrkEvent.event.channel, new Map<number, MIDI.MIDIEvent>());
+                            tickCCEventMap.set(mtrkEvent.event.channel, new Map<number, Array<MIDI.MIDIEvent>>());
                         }
-                        tickCCEventMap.get(mtrkEvent.event.channel).set(tick, mtrkEvent.event);
+                        if (!tickCCEventMap.get(mtrkEvent.event.channel).has(tick)) {
+                            tickCCEventMap.get(mtrkEvent.event.channel).set(tick, new Array<MIDI.MIDIEvent>());
+                        }
+                        tickCCEventMap.get(mtrkEvent.event.channel).get(tick).push(mtrkEvent.event);
                     } else if (mtrkEvent.event.isProgramChangeEvent) {
                         // Program ID
                         const lastTick = channelToInstrumentLastTick.get(mtrkEvent.event.channel);
@@ -446,134 +449,147 @@ export namespace Synthesizer {
         });
 
         tickCCEventMap.forEach((tickEventMap) => {
-            Object.keys(tickEventMap).map(a => Number(a)).sort().forEach((tick) => {
-                const mtrkEvent = tickEventMap.get(tick);
-                const lastTick = channelToInstrumentLastTick.get(mtrkEvent.channel);
-                let channelInfo : ChannelInfo;
-                if (channelToInstrumentLastTick.has(mtrkEvent.channel)) {
-                    let lastInstrument = tickInstrumentMap.get(mtrkEvent.channel).get(lastTick);
-                    channelInfo = new ChannelInfo(lastInstrument);
-                } else {
-                    channelInfo = new ChannelInfo();
-                }
-                if (mtrkEvent.controlCommand === 0x00 || mtrkEvent.controlCommand === 0x20) {
-                    // BANK Select (0x00 -> LSB, 0x20 -> MSB)
-                    if (mtrkEvent.controlCommand === 0x20) {
-                        // MSB
-                        channelInfo.bankID = (channelInfo.bankID & 0xFF00) + mtrkEvent.value1;
-                    } else {
-                        // LSB
-                        channelInfo.bankID = (channelInfo.bankID & 0x00FF) + (mtrkEvent.value1 << 8);
-                    }
-                } else if (mtrkEvent.controlCommand === 1) {
-                    // Modulation wheel
-                    channelInfo.modWheel = mtrkEvent.value1;
-                } else if (mtrkEvent.controlCommand === 7) {
-                    // Volume
-                    channelInfo.volume = mtrkEvent.value1;
-                } else if (mtrkEvent.controlCommand === 10) {
-                    // PAN
-                    channelInfo.pan = mtrkEvent.value1;
-                } else if (mtrkEvent.controlCommand === 11) {
-                    // Expression
-                    channelInfo.expression = mtrkEvent.value1;
-                } else if (mtrkEvent.controlCommand === 6) {
-                    // RPN Data Entry
-                    if (channelInfo.usingNrpn) {
-                        // NRPN
-                        console.warn("not implemented NRPN", mtrkEvent.channel, channelInfo.nRPNMSB.toString(16), channelInfo.nRPNLSB.toString(16), mtrkEvent.value1);
-                    } else {
-                        // RPN
-                        if (channelInfo.rpnMSB === 0 && channelInfo.rpnLSB === 0 ) {
-                            // Pitchbend Sensitivity
-                            channelInfo.pitchBendSensitivity = mtrkEvent.value1;
-                        } else {
-                            console.warn("not inplemented RPN", mtrkEvent.channel, channelInfo.rpnMSB.toString(16), channelInfo.rpnLSB.toString(16));
-                        }
-                    }
-                } else if (mtrkEvent.controlCommand === 71) {
-                    // filter resonance
-                    if (mtrkEvent.value1 !== 64) {
-                        console.warn("not implemented about filter!", mtrkEvent.value1);
-                    }
-                } else if (mtrkEvent.controlCommand === 72) {
-                    // Release Time
-                    if (mtrkEvent.value1 !== 64) {
-                        console.warn("not implemented about time cent!", mtrkEvent.value1);
-                    }
-                } else if (mtrkEvent.controlCommand === 73) {
-                    // Attack Time
-                    if (mtrkEvent.value1 !== 64) {
-                        console.warn("not implemented about filter!", mtrkEvent.value1);
-                    }
-                } else if (mtrkEvent.controlCommand === 75) {
-                    // Release Time
-                    if (mtrkEvent.value1 !== 64) {
-                        console.warn("not implemented about time cent!", mtrkEvent.value1);
-                    }
-                } else if (mtrkEvent.controlCommand === 74) {
-                    // Brightness
-                    if (mtrkEvent.value1 !== 64) {
-                        console.warn("not implemented about time cent!", mtrkEvent.value1);
-                    }
-                } else if (mtrkEvent.controlCommand === 91) {
-                    // Reverb (実装済み)
-                    if (mtrkEvent.value1 !== 0) {
-                        channelInfo.reverbLevel = mtrkEvent.value1;
-                    }
-                } else if (mtrkEvent.controlCommand === 93) {
-                    // Chorus (実装済み)
-                    if (mtrkEvent.value1 !== 0) {
-                        channelInfo.chorusLevel = mtrkEvent.value1;
-                    }
-                } else if (mtrkEvent.controlCommand === 94) {
-                    // Delay(GS) / Variety(XG)
-                    if (midi.usingXG) {
-                        if (mtrkEvent.value1 !== 0) {
-                            console.warn("not implemented Variable Effect", mtrkEvent.value1)
-                        }
-                    } else {
-                        if (mtrkEvent.value1 !== 0) {
-                            console.warn("not implemented Delay", mtrkEvent.value1)
-                        }
+            const ticks = new Array<number>();
+            let ite = tickEventMap.keys();
+            let res : IteratorResult<number>;
+            while (true) {
+                res = ite.next();
+                if (res.done) break;
+                ticks.push(res.value);
+            }
+            ticks.sort((a, b) => a - b).forEach((tick) => {
+                const mtrkEvents = tickEventMap.get(tick);
+                mtrkEvents.forEach(mtrkEvent => {
 
-                    }
-                } else if (mtrkEvent.controlCommand === 98) {
-                    // NRPN LSB
-                    if (!midi.usingXG) {
-                        console.error("This MIDI is not using XG!");
-                    }
-                    channelInfo.nRPNLSB = mtrkEvent.value1;
-                    channelInfo.usingNrpn = true;
-                } else if (mtrkEvent.controlCommand === 99) {
-                    // NRPN MSB
-                    if (!midi.usingXG) {
-                        console.error("This MIDI is not using XG!");
-                    }
-                    channelInfo.nRPNMSB = mtrkEvent.value1;
-                    channelInfo.usingNrpn = true;
-                } else if (mtrkEvent.controlCommand === 100) {
-                    // RPN LSB
-                    channelInfo.rpnLSB = mtrkEvent.value1;
-                    channelInfo.usingNrpn = false;
-                } else if (mtrkEvent.controlCommand === 101) {
-                    // RPN MSB
-                    channelInfo.rpnMSB = mtrkEvent.value1;
-                    channelInfo.usingNrpn = false;
-                } else if (mtrkEvent.controlCommand === 111) {
-                    if (channelInfo.loopStartTick <= 0) {
-                        channelInfo.loopStartTick = tick;
+                    const lastTick = channelToInstrumentLastTick.get(mtrkEvent.channel);
+                    let channelInfo : ChannelInfo;
+                    if (channelToInstrumentLastTick.has(mtrkEvent.channel)) {
+                        let lastInstrument = tickInstrumentMap.get(mtrkEvent.channel).get(lastTick);
+                        channelInfo = new ChannelInfo(lastInstrument);
                     } else {
-                        channelInfo.loopLengthTick = tick - channelInfo.loopStartTick;
+                        channelInfo = new ChannelInfo();
                     }
-                } else {
-                    console.warn("not implemented Control Command", mtrkEvent.channel, mtrkEvent.controlCommand, mtrkEvent);
-                }
-                if (!tickInstrumentMap.get(mtrkEvent.channel)) tickInstrumentMap.set(mtrkEvent.channel, new Map());
-                tickInstrumentMap.get(mtrkEvent.channel).set(tick, channelInfo);
-                channelToInstrumentLastTick.set(mtrkEvent.channel, tick);
+                    if (mtrkEvent.controlCommand === 0x00 || mtrkEvent.controlCommand === 0x20) {
+                        // BANK Select (0x00 -> LSB, 0x20 -> MSB)
+                        if (mtrkEvent.controlCommand === 0x20) {
+                            // MSB
+                            channelInfo.bankID = (channelInfo.bankID & 0xFF00) + mtrkEvent.value1;
+                        } else {
+                            // LSB
+                            channelInfo.bankID = (channelInfo.bankID & 0x00FF) + (mtrkEvent.value1 << 8);
+                        }
+                    } else if (mtrkEvent.controlCommand === 1) {
+                        // Modulation wheel
+                        channelInfo.modWheel = mtrkEvent.value1;
+                    } else if (mtrkEvent.controlCommand === 7) {
+                        // Volume
+                        channelInfo.volume = mtrkEvent.value1;
+                    } else if (mtrkEvent.controlCommand === 10) {
+                        // PAN
+                        channelInfo.pan = mtrkEvent.value1;
+                    } else if (mtrkEvent.controlCommand === 11) {
+                        // Expression
+                        channelInfo.expression = mtrkEvent.value1;
+                    } else if (mtrkEvent.controlCommand === 6) {
+                        // RPN Data Entry
+                        if (channelInfo.usingNrpn) {
+                            // NRPN
+                            console.warn("not implemented NRPN", mtrkEvent.channel, channelInfo.nRPNMSB.toString(16), channelInfo.nRPNLSB.toString(16), mtrkEvent.value1);
+                        } else {
+                            // RPN
+                            if (channelInfo.rpnMSB === 0 && channelInfo.rpnLSB === 0 ) {
+                                // Pitchbend Sensitivity
+                                channelInfo.pitchBendSensitivity = mtrkEvent.value1;
+                            } else {
+                                console.warn("not inplemented RPN", mtrkEvent.channel, channelInfo.rpnMSB.toString(16), channelInfo.rpnLSB.toString(16));
+                            }
+                        }
+                    } else if (mtrkEvent.controlCommand === 71) {
+                        // filter resonance
+                        if (mtrkEvent.value1 !== 64) {
+                            console.warn("not implemented about filter!", mtrkEvent.value1);
+                        }
+                    } else if (mtrkEvent.controlCommand === 72) {
+                        // Release Time
+                        if (mtrkEvent.value1 !== 64) {
+                            console.warn("not implemented about time cent!", mtrkEvent.value1);
+                        }
+                    } else if (mtrkEvent.controlCommand === 73) {
+                        // Attack Time
+                        if (mtrkEvent.value1 !== 64) {
+                            console.warn("not implemented about filter!", mtrkEvent.value1);
+                        }
+                    } else if (mtrkEvent.controlCommand === 75) {
+                        // Release Time
+                        if (mtrkEvent.value1 !== 64) {
+                            console.warn("not implemented about time cent!", mtrkEvent.value1);
+                        }
+                    } else if (mtrkEvent.controlCommand === 74) {
+                        // Brightness
+                        if (mtrkEvent.value1 !== 64) {
+                            console.warn("not implemented about time cent!", mtrkEvent.value1);
+                        }
+                    } else if (mtrkEvent.controlCommand === 91) {
+                        // Reverb (実装済み)
+                        if (mtrkEvent.value1 !== 0) {
+                            channelInfo.reverbLevel = mtrkEvent.value1;
+                        }
+                    } else if (mtrkEvent.controlCommand === 93) {
+                        // Chorus (実装済み)
+                        if (mtrkEvent.value1 !== 0) {
+                            channelInfo.chorusLevel = mtrkEvent.value1;
+                        }
+                    } else if (mtrkEvent.controlCommand === 94) {
+                        // Delay(GS) / Variety(XG)
+                        if (midi.usingXG) {
+                            if (mtrkEvent.value1 !== 0) {
+                                console.warn("not implemented Variable Effect", mtrkEvent.value1)
+                            }
+                        } else {
+                            if (mtrkEvent.value1 !== 0) {
+                                console.warn("not implemented Delay", mtrkEvent.value1)
+                            }
+    
+                        }
+                    } else if (mtrkEvent.controlCommand === 98) {
+                        // NRPN LSB
+                        if (!midi.usingXG) {
+                            console.error("This MIDI is not using XG!");
+                        }
+                        channelInfo.nRPNLSB = mtrkEvent.value1;
+                        channelInfo.usingNrpn = true;
+                    } else if (mtrkEvent.controlCommand === 99) {
+                        // NRPN MSB
+                        if (!midi.usingXG) {
+                            console.error("This MIDI is not using XG!");
+                        }
+                        channelInfo.nRPNMSB = mtrkEvent.value1;
+                        channelInfo.usingNrpn = true;
+                    } else if (mtrkEvent.controlCommand === 100) {
+                        // RPN LSB
+                        channelInfo.rpnLSB = mtrkEvent.value1;
+                        channelInfo.usingNrpn = false;
+                    } else if (mtrkEvent.controlCommand === 101) {
+                        // RPN MSB
+                        channelInfo.rpnMSB = mtrkEvent.value1;
+                        channelInfo.usingNrpn = false;
+                    } else if (mtrkEvent.controlCommand === 111) {
+                        if (channelInfo.loopStartTick <= 0) {
+                            channelInfo.loopStartTick = tick;
+                        } else {
+                            channelInfo.loopLengthTick = tick - channelInfo.loopStartTick;
+                        }
+                    } else {
+                        console.warn("not implemented Control Command", mtrkEvent.channel, mtrkEvent.controlCommand, mtrkEvent);
+                    }
+                    if (!tickInstrumentMap.get(mtrkEvent.channel)) tickInstrumentMap.set(mtrkEvent.channel, new Map());
+                    tickInstrumentMap.get(mtrkEvent.channel).set(tick, channelInfo);
+                    channelToInstrumentLastTick.set(mtrkEvent.channel, tick);
+                });
             });
         });
+
+        console.log(tickInstrumentMap, tickCCEventMap, tickPitchBendMap);
 
         const channelIDs = new Set<number>();
         tickInstrumentMap.forEach((_, channelID) => channelIDs.add(channelID));
@@ -872,8 +888,14 @@ export namespace Synthesizer {
                                             let sampleOffsetSpeedCents = 0;
                                             let eg2PitchCents = 0;
                                             if (art1Info.EG2ToPitch !== 0) {
-                                                const attackTime = getEG2AttackTimeFromArt1Info(art1Info, noteInfo.velocity);
+                                                let attackTime = getEG2AttackTimeFromArt1Info(art1Info, noteInfo.velocity);
                                                 const decayTime = getEG2DecayTimeFromArt1Info(art1Info, noteInfo.noteID);
+                                                const noteSeconds = sec - secFromReleased;
+                                                let attackRate = 1.0;
+                                                if (attackTime > noteSeconds) {
+                                                    attackTime = noteSeconds;
+                                                    attackRate = attackTime === 0 ? 1.0 : 1 / (noteSeconds / attackTime);
+                                                }
                                                 if (sec < attackTime) {
                                                     // Attack Zone
                                                     if (sec === 0) {
@@ -886,10 +908,10 @@ export namespace Synthesizer {
                                                     if (sec === 0 || art1Info.EG2DecayTime === 0) {
                                                         eg2PitchCents = 0;
                                                     } else {
-                                                        if (sec === attackTime) {
+                                                        if (sec <= attackTime) {
                                                             eg2PitchCents = art1Info.EG2ToPitch;
                                                         } else {
-                                                            eg2PitchCents = art1Info.EG2ToPitch - art1Info.EG2ToPitch * Math.min(1, (sec - attackTime) / decayTime);
+                                                            eg2PitchCents = art1Info.EG2ToPitch * (1 - Math.min(1, (sec - Math.min(attackTime, noteSeconds)) / decayTime));
                                                         }
                                                     }
                                                     eg2PitchCents = art1Info.EG2ToPitch > 0 ? 
@@ -901,8 +923,8 @@ export namespace Synthesizer {
                                                     if (sec === 0 || art1Info.EG2DecayTime === 0) {
                                                         dddx = 0;
                                                     } else {
-                                                        if (sec !== attackTime) {
-                                                            dddx = art1Info.EG2ToPitch -  art1Info.EG2ToPitch * Math.min(1, (sec - attackTime) / decayTime);
+                                                        if (sec <= attackTime) {
+                                                            dddx = art1Info.EG2ToPitch * (1 - Math.min(1, (sec - Math.min(attackTime, noteSeconds)) / decayTime));
                                                         }
                                                     }
                                                     dddx = art1Info.EG2ToPitch > 0 ? 
@@ -914,7 +936,7 @@ export namespace Synthesizer {
                                                         if (noteInfo.endOffset === offset) {
                                                             eg2PitchCents = dddx;
                                                         } else {
-                                                            eg2PitchCents = art1Info.EG2ToPitch - art1Info.EG2ToPitch * Math.min(1, secFromReleased / (art1Info.EG2ReleaseTime));
+                                                            eg2PitchCents = art1Info.EG2ToPitch * (1 - Math.min(1, secFromReleased / (art1Info.EG2ReleaseTime)));
                                                         }
                                                     }
                                                     eg2PitchCents = art1Info.EG2ToPitch > 0 ? 
@@ -922,7 +944,7 @@ export namespace Synthesizer {
                                                         Math.max(eg2PitchCents, dddx);
                                                 }
                                                 // eg2PitchCents : cent単位
-                                                eg2PitchCents = Math.max(-1200, Math.min(1200, eg2PitchCents));
+                                                eg2PitchCents = Math.max(-1200, Math.min(1200, attackRate * eg2PitchCents));
                                             }
                                             sampleOffsetSpeedCents += eg2PitchCents;
                                             // LFO情報もpositionDXに適用 (cent単位)
@@ -980,9 +1002,16 @@ export namespace Synthesizer {
                                         // NOTE : AttenuationはdB単位で取得し最後に雑に指数関数的に減衰させる
                                         let eg1Attenuation = 96;
                                         if (art1Info) {
-                                            const attackTime = getEG1AttackTimeFromArt1Info(art1Info, noteInfo.velocity);
+                                            let attackTime = getEG1AttackTimeFromArt1Info(art1Info, noteInfo.velocity);
                                             const decayTime = getEG1DecayTimeFromArt1Info(art1Info, noteInfo.noteID);
-                                            if (sec < attackTime) {
+                                            const noteSeconds = sec - secFromReleased;
+                                            let attackRate = 1.0;
+                                            if (attackTime > noteSeconds) {
+                                                attackTime = noteSeconds;
+                                                attackRate = attackTime === 0 ? 1.0 : 1 / (noteSeconds / attackTime);
+                                            }
+
+                                            if (sec < attackTime && positionFromReleased <= 0) {
                                                 // Attack Zone
                                                 eg1Attenuation = Math.min(96, sec === 0 ? 96 : 20 * Math.log10(attackTime / sec));
                                             } else if (positionFromReleased <= 0) {
@@ -990,33 +1019,33 @@ export namespace Synthesizer {
                                                 if (sec === 0 || decayTime === 0) {
                                                     eg1Attenuation = 96;
                                                 } else {
-                                                    if (sec === attackTime) {
-                                                        eg1Attenuation = 0;
+                                                    if (sec <= attackTime) {
+                                                        eg1Attenuation =  Math.min(96, sec === 0 ? 96 : 20 * Math.log10(attackTime / sec));
                                                     } else {
-                                                        eg1Attenuation = 96 * (sec - attackTime) / decayTime;
+                                                        eg1Attenuation = 96 * attackRate * (sec - attackTime) / decayTime;
                                                     }
                                                 }
-                                                eg1Attenuation = Math.min(eg1Attenuation, 96 * (1 - art1Info.EG1SustainLevel / 100.0));
+                                                eg1Attenuation = Math.min(eg1Attenuation, 96 * attackRate * (1 - art1Info.EG1SustainLevel / 100.0));
                                             } else {
-                                                // Sustain or Release Zone
-                                                let dAttenuation = 96;
+                                                // Sustain or Release Zone (Attack -> Release Pattern also included)
+                                                let dAttenuation = 96 * attackRate;
                                                 if (sec === 0 || decayTime === 0) {
-                                                    dAttenuation = 96;
+                                                    dAttenuation = 96 * attackRate ;
                                                 } else {
-                                                    if (sec === attackTime) {
-                                                        dAttenuation = 0;
+                                                    if (sec <= attackTime) {
+                                                        dAttenuation = Math.min(96, sec === 0 ? 96 : 20 * Math.log10(attackTime / sec));
                                                     } else {
-                                                        dAttenuation = 96 * (sec - attackTime) / decayTime;
+                                                        dAttenuation = 96 * attackRate * (sec - attackTime) / decayTime;
                                                     }
                                                 }
-                                                dAttenuation = Math.min(dAttenuation, 96 * (1 - art1Info.EG1SustainLevel / 100.0));
+                                                dAttenuation = Math.min(dAttenuation, 96 * attackRate * (1 - art1Info.EG1SustainLevel / 100.0));
                                                 if (art1Info.EG1ReleaseTime === 0) {
-                                                    eg1Attenuation = 96;
+                                                    eg1Attenuation = 96 * attackRate;
                                                 } else {
                                                     if (offset === noteInfo.endOffset) {
                                                         eg1Attenuation = dAttenuation;
                                                     } else {
-                                                        eg1Attenuation = 96 * secFromReleased / art1Info.EG1ReleaseTime;
+                                                        eg1Attenuation = 96 * attackRate * secFromReleased / art1Info.EG1ReleaseTime;
                                                     }
                                                 }
                                                 if (noteInfo.notEnds) {
