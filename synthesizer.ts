@@ -894,7 +894,7 @@ export namespace Synthesizer {
                                                     attackRate = attackTime === 0 ? 1.0 : 1 / (noteSeconds / attackTime);
                                                     attackTime = noteSeconds;
                                                 }
-                                                if (offset % 100000 === 0) console.log(attackTime, decayTime, noteSeconds, attackRate);
+                                                // if (offset % 100000 === 0) console.log(attackTime, decayTime, noteSeconds, attackRate);
                                                 if (sec < attackTime) {
                                                     // Attack Zone
                                                     if (sec === 0) {
@@ -910,13 +910,14 @@ export namespace Synthesizer {
                                                         if (sec <= attackTime) {
                                                             eg2PitchCents = art1Info.EG2ToPitch;
                                                         } else {
-                                                            eg2PitchCents = art1Info.EG2ToPitch - art1Info.EG2ToPitch * Math.max(0, Math.min(1, (sec - Math.min(attackTime, noteSeconds))) / decayTime);
-                                                            if (offset % 100000 === 0) console.log(art1Info.EG2ToPitch, eg2PitchCents, sec, sec - Math.min(attackTime, noteSeconds));
+                                                            eg2PitchCents = art1Info.EG2ToPitch - art1Info.EG2ToPitch * Math.max(0, Math.min(1, (sec - Math.min(attackTime, noteSeconds)) / decayTime));
+                                                            // if (offset % 100000 === 0) console.log(wsmp.sFineTune, attackTime, decayTime, noteSeconds, attackRate, art1Info.EG2ToPitch, eg2PitchCents, sec, sec - Math.min(attackTime, noteSeconds));
                                                         }
                                                     }
                                                     eg2PitchCents = art1Info.EG2ToPitch > 0 ? 
-                                                        Math.min(0, Math.max(eg2PitchCents, art1Info.EG2ToPitch * art1Info.EG2SustainLevel / 100.0)) : 
-                                                        Math.max(0, Math.min(eg2PitchCents, art1Info.EG2ToPitch * art1Info.EG2SustainLevel / 100.0));
+                                                        Math.min(art1Info.EG2ToPitch, Math.max(eg2PitchCents, art1Info.EG2ToPitch * art1Info.EG2SustainLevel / 100.0)) : 
+                                                        Math.max(art1Info.EG2ToPitch, Math.min(eg2PitchCents, art1Info.EG2ToPitch * art1Info.EG2SustainLevel / 100.0));
+                                                    // if (offset % 100000 === 0) console.log(wsmp.sFineTune, art1Info.EG2ToPitch, eg2PitchCents, art1Info.EG2SustainLevel, Math.max(eg2PitchCents, art1Info.EG2ToPitch * art1Info.EG2SustainLevel / 100.0));
                                                 } else {
                                                     // Sustain or Release Zone
                                                     let dddx = art1Info.EG2ToPitch;
@@ -924,7 +925,7 @@ export namespace Synthesizer {
                                                         dddx = 0;
                                                     } else {
                                                         if (sec <= attackTime) {
-                                                            dddx = art1Info.EG2ToPitch - art1Info.EG2ToPitch * Math.max(0, Math.min(1, (sec - Math.min(attackTime, noteSeconds))) / decayTime);
+                                                            dddx = art1Info.EG2ToPitch - art1Info.EG2ToPitch * Math.max(0, Math.min(1, (sec - Math.min(attackTime, noteSeconds)) / decayTime));
                                                         }
                                                     }
                                                     dddx = art1Info.EG2ToPitch > 0 ? 
