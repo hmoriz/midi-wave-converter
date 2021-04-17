@@ -387,7 +387,7 @@ export namespace Synthesizer {
                                     // 前回のONイベントがOFFにならずに残っているので一つ前のtickでオフにさせる(同一tickで同時にオンになっていた場合1つだけオフにする)
                                     const lastTick = lastTicks.pop();
                                     const noteInfo = tickNotesMap.get((mtrkEvent.event as MIDI.MIDIEvent).channel).get(lastTick).find(nInfo => noteID === nInfo.noteID && !nInfo.endTick);
-                                    noteInfo.endTick = tick -1;
+                                    noteInfo.endTick = (lastTick >= tick) ? tick : tick -1;
                                     noteInfo.notEnds = true;
                                 }
                             } else {
