@@ -5113,7 +5113,7 @@ const main = require('./index.ts');
 const midiElement = document.getElementById('midiarea');
 const inputDLS = document.createElement('input');
 inputDLS.type = 'file';
-midiElement.appendChild(document.createTextNode("dls file: "));
+midiElement.appendChild(document.createTextNode("gm.dls: "));
 midiElement.appendChild(inputDLS);
 
 let dlsResult;
